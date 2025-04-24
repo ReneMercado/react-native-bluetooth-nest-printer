@@ -1,7 +1,30 @@
 # react-native-bluetooth-nest-printer
 
-[![version](https://img.shields.io/badge/version-1.0.1-4CAF50)](https://www.npmjs.com/package/react-native-bluetooth-nest-printer)
+[![version](https://img.shields.io/badge/version-1.0.5-4CAF50)](https://www.npmjs.com/package/react-native-bluetooth-nest-printer)
 [![version](https://img.shields.io/badge/react--native-0.7x-1E88E5)](https://www.npmjs.com/package/react-native-bluetooth-nest-printer)
+
+## Important Note on This Fork
+
+This fork modifies the original package to use CocoaPods for managing the ZXingObjC dependency instead of bundling it with the package. This helps prevent conflicts when used with other packages that also use ZXingObjC (like expo-camera).
+
+To use this modified version:
+
+```bash
+# Using npm
+npm install --save ReneMercado/react-native-bluetooth-nest-printer
+
+# Using yarn
+yarn add github:ReneMercado/react-native-bluetooth-nest-printer
+```
+
+Then in your iOS project:
+
+```bash
+cd ios
+pod install
+```
+
+---
 
 This library is complete from [react-native-bluetooth-escpos-printer](https://github.com/januslo/react-native-bluetooth-escpos-printer), thanks Januslo!
 
