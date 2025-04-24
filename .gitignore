@@ -1,0 +1,40 @@
+# Exclude the bundled ZXingObjC library that's no longer needed
+ios/ZXingObjC-3.2.2/
+
+# Node modules
+node_modules/
+
+# Xcode
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata
+*.xccheckout
+*.moved-aside
+DerivedData
+*.hmap
+*.ipa
+*.xcuserstate
+project.xcworkspace
+
+# Android
+build/
+.gradle/
+local.properties
+*.iml
+android/.idea/
+android/build/
+android/gradle/
+android/.gradle/
+android/gradlew
+android/gradlew.bat
+
+# iOS
+ios/build/
+ios/Pods/
+ios/*.xcworkspace/xcshareddata 
