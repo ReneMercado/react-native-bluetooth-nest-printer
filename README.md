@@ -528,9 +528,34 @@ set the rotate of the line.
 
 set blob of the line.
 
-#### printQRCode(String content, int size, int correctionLevel)
+#### printQRCode(String content, int size, int correctionLevel, int leftPadding)
 
 prints the qrcode.
+
+- `content`: String, the QR code content
+- `size`: int, the QR code size (width X width)
+- `correctionLevel`: int, error correction level, using `BluetoothEscposPrinter.ERROR_CORRECTION` constants
+- `leftPadding`: int, optional padding from the left edge in pixels. If set to 0 or negative, the QR code will be automatically centered based on the printer's width.
+
+Example usage:
+
+```javascript
+// Print QR code with auto-centering
+await BluetoothEscposPrinter.printQRCode(
+  "https://example.com", 
+  200,  // size
+  BluetoothEscposPrinter.ERROR_CORRECTION.M,  // error correction level
+  0     // 0 for auto-center
+);
+
+// Print QR code with custom left padding
+await BluetoothEscposPrinter.printQRCode(
+  "https://example.com", 
+  200,  // size
+  BluetoothEscposPrinter.ERROR_CORRECTION.M,  // error correction level
+  100   // 100 pixels from left edge
+);
+```
 
 #### printBarCode(String str,int nType, int nWidthX, int nHeight, int nHriFontType, int nHriFontPosition)
 

@@ -1,4 +1,3 @@
-
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import "RNBluetoothManager.h"
@@ -519,6 +518,7 @@ RCT_EXPORT_METHOD(printPic:(NSString *) base64encodeStr withOptions:(NSDictionar
 RCT_EXPORT_METHOD(printQRCode:(NSString *)content
                   withSize:(NSInteger) size
                   correctionLevel:(NSInteger) correctionLevel
+                  leftPadding:(NSInteger) leftPadding
                   andResolver:(RCTPromiseResolveBlock) resolve
                   rejecter:(RCTPromiseRejectBlock) reject)
 {
@@ -539,10 +539,26 @@ RCT_EXPORT_METHOD(printQRCode:(NSString *)content
     if(error || !result){
         reject(@"ERROR_IN_CREATE_QRCODE",@"ERROR_IN_CREATE_QRCODE",nil);
     }else{
+        // Calculate left padding for auto-centering if leftPadding is not specified
+        NSInteger appliedLeftPadding;
+        if (leftPadding > 0) {
+            // Use the explicitly provided leftPadding
+            appliedLeftPadding = leftPadding;
+        } else {
+            // Auto-center the QR code based on the printer width
+            // Get the current printer width - default to 384 (58mm) if not set
+            NSInteger printerWidth = [ImageUtils defaultWidth];
+            NSInteger remainingSpace = printerWidth - size;
+            appliedLeftPadding = (remainingSpace > 0) ? remainingSpace / 2 : 0;
+        }
+        
         CGImageRef image = [[ZXImage imageWithMatrix:result] cgimage];
         uint8_t * graImage = [ImageUtils imageToGreyImage:[UIImage imageWithCGImage:image]];
+        
+        // Apply left padding by modifying the image data or command
         unsigned char * formatedData = [ImageUtils format_K_threshold:graImage width:size height:size];
-        NSData *dataToPrint = [ImageUtils eachLinePixToCmd:formatedData nWidth:size nHeight:size nMode:0];
+        NSData *dataToPrint = [ImageUtils eachLinePixToCmd:formatedData nWidth:size nHeight:size nMode:0 leftPadding:appliedLeftPadding];
+        
         PrintImageBleWriteDelegate *delegate = [[PrintImageBleWriteDelegate alloc] init];
         delegate.pendingResolve=resolve;
         delegate.pendingReject = reject;

@@ -113,6 +113,15 @@ BluetoothTscPrinter.READABLE = {
   EANBLE: 1,
 };
 
+/**
+ * BluetoothEscposPrinter has the following methods:
+ * 
+ * printQRCode: Prints a QR code
+ *   - content: string - The content to encode in the QR code
+ *   - size: number - The size of the QR code
+ *   - correctionLevel: number - The error correction level (use ERROR_CORRECTION constants)
+ *   - leftPadding: number - Optional padding from the left edge (0 for auto-center)
+ */
 BluetoothEscposPrinter.ERROR_CORRECTION = {
   L: 1,
   M: 0,

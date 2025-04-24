@@ -1,4 +1,3 @@
-
 package cn.jystudio.bluetooth.escpos;
 
 import android.graphics.Bitmap;
@@ -382,8 +381,18 @@ public class RNBluetoothEscposPrinterModule extends ReactContextBaseJavaModule
         }
     }
 
+    /**
+     * Print a QR code on the printer.
+     * 
+     * @param content The content to encode in the QR code
+     * @param size The size of the QR code
+     * @param correctionLevel The error correction level (0-3)
+     * @param leftPadding The left padding in pixels. If set to 0 or negative, the QR code will be auto-centered
+     *                    based on the printer's deviceWidth
+     * @param promise The promise to resolve/reject based on the outcome
+     */
     @ReactMethod
-    public void printQRCode(String content, int size, int correctionLevel, final Promise promise) {
+    public void printQRCode(String content, int size, int correctionLevel, int leftPadding, final Promise promise) {
         try {
             Log.i(TAG, "生成的文本：" + content);
             // 把输入的文本转为二维码
@@ -395,6 +404,20 @@ public class RNBluetoothEscposPrinterModule extends ReactContextBaseJavaModule
 
             int width = bitMatrix.getWidth();
             int height = bitMatrix.getHeight();
+            
+            // Calculate left padding to center the QR code if leftPadding is not specified
+            int appliedLeftPadding;
+            if (leftPadding > 0) {
+                // Use the explicitly provided leftPadding
+                appliedLeftPadding = leftPadding;
+            } else {
+                // Auto-center the QR code based on the printer width
+                // The QR code width will be resized to match the specified size
+                // We calculate the remaining space and divide by 2 to center
+                int availableWidth = deviceWidth;
+                int remainingSpace = availableWidth - size;
+                appliedLeftPadding = remainingSpace > 0 ? remainingSpace / 2 : 0;
+            }
 
             System.out.println("w:" + width + "h:"
                     + height);
@@ -414,9 +437,8 @@ public class RNBluetoothEscposPrinterModule extends ReactContextBaseJavaModule
                     Bitmap.Config.ARGB_8888);
 
             bitmap.setPixels(pixels, 0, width, 0, 0, width, height);
-
-            //TODO: may need a left padding to align center.
-            byte[] data = PrintPicture.POS_PrintBMP(bitmap, size, 0, 0);
+            
+            byte[] data = PrintPicture.POS_PrintBMP(bitmap, size, 0, appliedLeftPadding);
             if (sendDataByte(data)) {
                 promise.resolve(null);
             } else {
