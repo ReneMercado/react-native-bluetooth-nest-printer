@@ -540,9 +540,9 @@ RCT_EXPORT_METHOD(printQRCode:(NSString *)content
 
   // 2) Configuración de hints usando ZXEncodeHints
   ZXEncodeHints *hints = [ZXEncodeHints hints];
-  hints.encoding             = NSUTF8StringEncoding;                       // Charset UTF-8
-  hints.margin               = @0;                                        // Sin margen
-  hints.errorCorrectionLevel = [self findCorrectionLevel:correctionLevel]; // Nivel de corrección
+  hints.encoding             = NSUTF8StringEncoding;
+  hints.margin               = @0;
+  hints.errorCorrectionLevel = [self findCorrectionLevel:correctionLevel];
 
   // 3) Generar la matriz de bits del QR
   ZXMultiFormatWriter *writer = [ZXMultiFormatWriter writer];
@@ -553,48 +553,55 @@ RCT_EXPORT_METHOD(printQRCode:(NSString *)content
                                  hints:hints
                                  error:&error];
 
-    if (!result) {
-        NSLog(@"[QR FAIL] No matrix: %@ / %@", error.domain ?: @"no err domain", error.localizedDescription ?: @"no desc");
-        reject(@"ERROR_IN_CREATE_QRCODE", @"Failed to generate QR matrix", error);
-        return;
-    }
-
-  // 4) Manejo de errores al generar el QR
+  // 4) Validar resultado
   if (error || !result) {
-    NSString *message = [NSString stringWithFormat:
-      @"QR generation failed. Domain:%@ Code:%ld Msg:%@",
-      error.domain ?: @"Unknown",
-      (long)error.code,
-      error.localizedDescription ?: @"Unknown error"];
-    NSLog(@"QR Error: %@", message);
-    reject(@"ERROR_IN_CREATE_QRCODE", message, error);
+    NSString *msg = error
+      ? error.localizedDescription
+      : @"Failed to generate QR matrix";
+    NSLog(@"[QR FAIL] %@", msg);
+    reject(@"ERROR_IN_CREATE_QRCODE", msg, error);
     return;
   }
 
-  // 5) Determinar padding lateral para centrar si no se pasó explícito
+  // 5) Calcular padding lateral para centrar
   NSInteger printerWidth   = [ImageUtils defaultWidth];
   NSInteger appliedLeftPad = leftPadding > 0
-                              ? leftPadding
-                              : MAX(0, (printerWidth - size) / 2);
+    ? leftPadding
+    : MAX(0, (printerWidth - size) / 2);
 
-  // 6) Convertir ZXBitMatrix a comandos de impresión
+  // 6) Renderizar ZXBitMatrix a CGImage
   CGImageRef cgImage = [[ZXImage imageWithMatrix:result] cgimage];
-  uint8_t *gray      = [ImageUtils imageToGreyImage:[UIImage imageWithCGImage:cgImage]];
-  unsigned char *bw  = [ImageUtils format_K_threshold:gray width:size height:size];
-  NSData *cmds       = [ImageUtils eachLinePixToCmd:
-                         bw
-                         nWidth:size
-                         nHeight:size
-                         nMode:0
-                    leftPadding:appliedLeftPad];
+  if (!cgImage) {
+    reject(@"ERROR_IN_CREATE_QRCODE", @"Failed to render CGImage from QR matrix", nil);
+    return;
+  }
 
-  // 7) Enviar al dispositivo vía BLE
+  // 7) Convertir a escala de grises y binarizar
+  uint8_t *gray = [ImageUtils imageToGreyImage:[UIImage imageWithCGImage:cgImage]];
+  if (!gray) {
+    reject(@"ERROR_IN_CREATE_QRCODE", @"Failed to convert QR to greyscale bitmap", nil);
+    return;
+  }
+
+  unsigned char *bw = [ImageUtils format_K_threshold:gray
+                                              width:size
+                                             height:size];
+  free(gray);
+
+  // 8) Generar comandos ESC/POS
+  NSData *cmds = [ImageUtils eachLinePixToCmd:bw
+                                      nWidth:size
+                                     nHeight:size
+                                       nMode:0
+                                  leftPadding:appliedLeftPad];
+
+  // 9) Enviar al dispositivo vía BLE
   PrintImageBleWriteDelegate *delegate = [[PrintImageBleWriteDelegate alloc] init];
   delegate.pendingResolve = resolve;
   delegate.pendingReject  = reject;
-  delegate.width         = size;
-  delegate.toPrint       = cmds;
-  delegate.now           = 0;
+  delegate.width          = size;
+  delegate.toPrint        = cmds;
+  delegate.now            = 0;
   [delegate print];
 }
 
