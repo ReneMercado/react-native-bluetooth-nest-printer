@@ -553,6 +553,12 @@ RCT_EXPORT_METHOD(printQRCode:(NSString *)content
                                  hints:hints
                                  error:&error];
 
+    if (!result) {
+        NSLog(@"[QR FAIL] No matrix: %@ / %@", error.domain ?: @"no err domain", error.localizedDescription ?: @"no desc");
+        reject(@"ERROR_IN_CREATE_QRCODE", @"Failed to generate QR matrix", error);
+        return;
+    }
+
   // 4) Manejo de errores al generar el QR
   if (error || !result) {
     NSString *message = [NSString stringWithFormat:
