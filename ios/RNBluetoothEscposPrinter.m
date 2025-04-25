@@ -7,8 +7,10 @@
 #import "ImageUtils.h"
 
 // Fix for compatibility with ZXingObjC 3.6.5
-#import <ZXingObjC/ZXingObjC.h>
-#import <ZXingObjC/ZXEncodeHints.h>  
+#import <ZXingObjC/ZXingObjC.h>              // umbrella para Core + ZXBitMatrix, ZXMultiFormatWriter, etc.
+#import <ZXingObjC/ZXEncodeHints.h>          // para ZXEncodeHints
+#import <ZXingObjC/ZXImage.h>                // para convertir ZXBitMatrix → CGImage
+#import <ZXingObjC/ZXQRCodeErrorCorrectionLevel.h> // para ZXQRCodeErrorCorrectionLevel en tu findCorrectionLevel:
 
 #import "PrintImageBleWriteDelegate.h"
 @implementation RNBluetoothEscposPrinter
