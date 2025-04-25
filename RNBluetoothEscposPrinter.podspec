@@ -14,8 +14,8 @@ Pod::Spec.new do |s|
   s.source_files  = "ios/*.{h,m}"
   s.exclude_files = "ios/ZXingObjC-3.2.2/**/*"
   s.dependency "React-Core"
-  s.dependency "ZXingObjC", "~> 3.6.5"
-  
+  s.dependency "ZXingObjC", "~> 3.6.8"
+
   # This is needed for Xcode 14+ builds
   s.pod_target_xcconfig = {
     'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'arm64',

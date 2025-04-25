@@ -528,9 +528,10 @@ RCT_EXPORT_METHOD(printQRCode:(NSString *)content
     NSLog(@"QRCODE TO PRINT: %@",content);
     NSError *error = nil;
     ZXEncodeHints *hints = [ZXEncodeHints hints];
-    hints.encoding=NSUTF8StringEncoding;
-    hints.margin=0;
+    hints.encoding = NSUTF8StringEncoding;
+    hints.margin = 0;
     hints.errorCorrectionLevel = [self findCorrectionLevel:correctionLevel];
+
     
     ZXMultiFormatWriter *writer = [ZXMultiFormatWriter writer];
     ZXBitMatrix *result = [writer encode:content
