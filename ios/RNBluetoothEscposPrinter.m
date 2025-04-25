@@ -528,9 +528,10 @@ RCT_EXPORT_METHOD(printQRCode:(NSString *)content
     NSLog(@"QRCODE TO PRINT: %@",content);
     NSError *error = nil;
     ZXEncodeHints *hints = [ZXEncodeHints hints];
-    hints.encoding = NSUTF8StringEncoding;
-    hints.margin = 0;
-    hints.errorCorrectionLevel = [self findCorrectionLevel:correctionLevel];
+    // the hints.hints NSMutableDictionary lives under the hood
+    hints.hints[EZingEncodeHintTypeCharacterSet]       = @"UTF-8";                      // or ZXEncodeHintTypeCharacterSet
+    hints.hints[EZingEncodeHintTypeMargin]             = @(0);                          // or ZXEncodeHintTypeMargin
+    hints.hints[EZingEncodeHintTypeErrorCorrectionLevel] = [self findCorrectionLevel:correctionLevel]; // or ZXEncodeHintTypeErrorCorrection
 
     
     ZXMultiFormatWriter *writer = [ZXMultiFormatWriter writer];
