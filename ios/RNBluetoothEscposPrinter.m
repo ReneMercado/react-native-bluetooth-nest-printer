@@ -540,7 +540,17 @@ RCT_EXPORT_METHOD(printQRCode:(NSString *)content
                                     hints:hints
                                    error:&error];
     if(error || !result){
-        reject(@"ERROR_IN_CREATE_QRCODE",@"ERROR_IN_CREATE_QRCODE",nil);
+        // Create a detailed error message including ZXing error details
+        NSString *errorDomain = error ? error.domain : @"Unknown";
+        NSInteger errorCode = error ? error.code : -1;
+        NSString *errorDesc = error ? error.localizedDescription : @"Unknown error";
+        NSString *contentDebug = content ? [NSString stringWithFormat:@"Content (len: %lu): %@", (unsigned long)[content length], ([content length] > 30 ? [[content substringToIndex:30] stringByAppendingString:@"..."] : content)] : @"<nil>";
+        
+        NSString *detailedError = [NSString stringWithFormat:@"QR Code generation failed. Domain: %@, Code: %ld, Message: %@, Content: %@", 
+                                  errorDomain, (long)errorCode, errorDesc, contentDebug];
+        
+        NSLog(@"QR Error: %@", detailedError);
+        reject(@"ERROR_IN_CREATE_QRCODE", detailedError, error);
     }else{
         // Calculate left padding for auto-centering if leftPadding is not specified
         NSInteger appliedLeftPadding;
