@@ -527,64 +527,69 @@ RCT_EXPORT_METHOD(printQRCode:(NSString *)content
 {
   NSLog(@"QRCODE TO PRINT: %@", content);
 
-  // 1) Prepare the hints dictionary
-  NSError *error = nil;
-  ZXEncodeHints *hints = [ZXEncodeHints hints];
-  hints.hints[ZXEncodeHintTypeCharacterSet]    = @"UTF-8";
-  hints.hints[ZXEncodeHintTypeMargin]          = @0;
-  hints.hints[ZXEncodeHintTypeErrorCorrection] = [self findCorrectionLevel:correctionLevel];
+  if (content.length == 0) {
+    reject(@"QR_CONTENT_EMPTY", @"QR code content cannot be empty", nil);
+    return;
+  }
 
-  // 2) Generate the BitMatrix
+  NSError *error = nil;
+  // Build a plain NSDictionary of hints
+  NSDictionary *encodeHints = @{
+    ZXEncodeHintTypeCharacterSet : @"UTF-8",
+    ZXEncodeHintTypeMargin       : @0,
+    // ZXEncodeHintTypeErrorCorrection is the correct key for QR error-correction
+    ZXEncodeHintTypeErrorCorrection : [self findCorrectionLevel:correctionLevel]
+  };
+
   ZXMultiFormatWriter *writer = [ZXMultiFormatWriter writer];
   ZXBitMatrix *result = [writer encode:content
                                 format:kBarcodeFormatQRCode
                                  width:(int)size
                                 height:(int)size
-                                  hints:hints
+                                 hints:encodeHints
                                  error:&error];
 
   if (error || !result) {
-    // Build a detailed error message
-    NSString *domain = error ? error.domain : @"Unknown";
-    NSInteger code = error ? error.code : -1;
-    NSString *desc = error.localizedDescription ?: @"Unknown error";
-    NSString *dbg = [NSString stringWithFormat:@"Content (len:%lu): %@", (unsigned long)content.length,
-                     content.length > 30 ? [content substringToIndex:30] : content];
-    NSString *msg = [NSString stringWithFormat:
-                     @"QR generation failed. Domain:%@ Code:%ld Msg:%@ %@", domain, (long)code, desc, dbg];
-    NSLog(@"QR Error: %@", msg);
-    reject(@"ERROR_IN_CREATE_QRCODE", msg, error);
+    NSString *domain = error.domain ?: @"Unknown";
+    NSInteger code  = error.code;
+    NSString *desc  = error.localizedDescription ?: @"Unknown error";
+    NSString *debug = [NSString stringWithFormat:@"Content (len:%lu): %@",
+                        (unsigned long)content.length,
+                        content.length > 30
+                          ? [[content substringToIndex:30] stringByAppendingString:@"…"]
+                          : content];
+
+    NSString *message = [NSString stringWithFormat:
+      @"QR generation failed. Domain:%@ Code:%ld Msg:%@ — %@",
+      domain, (long)code, desc, debug];
+    NSLog(@"QR Error: %@", message);
+    reject(@"ERROR_IN_CREATE_QRCODE", message, error);
     return;
   }
 
-  // 3) Figure out padding
-  NSInteger appliedPadding = leftPadding > 0
-    ? leftPadding
-    : MAX(0, ([ImageUtils defaultWidth] - size) / 2);
+  // center if no explicit padding
+  NSInteger printerWidth     = [ImageUtils defaultWidth];
+  NSInteger appliedLeftPad   = leftPadding > 0
+                                ? leftPadding
+                                : MAX(0, (printerWidth - size) / 2);
 
-  // 4) Turn the BitMatrix into a bitmap buffer
   CGImageRef cgImage = [[ZXImage imageWithMatrix:result] cgimage];
-  uint8_t *grayData = [ImageUtils imageToGreyImage:[UIImage imageWithCGImage:cgImage]];
+  uint8_t *gray      = [ImageUtils imageToGreyImage:
+                         [UIImage imageWithCGImage:cgImage]];
+  unsigned char *bw  = [ImageUtils format_K_threshold:
+                         gray width:size height:size];
+  NSData *cmds       = [ImageUtils eachLinePixToCmd:
+                         bw nWidth:size nHeight:size nMode:0 leftPadding:appliedLeftPad];
 
-  // 5) Convert it into ESC/POS raster commands
-  unsigned char *thresholded = [ImageUtils format_K_threshold:grayData
-                                                      width:size
-                                                     height:size];
-  NSData *cmds = [ImageUtils eachLinePixToCmd:thresholded
-                                       nWidth:size
-                                      nHeight:size
-                                        nMode:0
-                                  leftPadding:appliedPadding];
-
-  // 6) Send to printer
-  PrintImageBleWriteDelegate *delegate = [PrintImageBleWriteDelegate new];
+  PrintImageBleWriteDelegate *delegate = [[PrintImageBleWriteDelegate alloc] init];
   delegate.pendingResolve = resolve;
   delegate.pendingReject  = reject;
-  delegate.width          = size;
-  delegate.toPrint        = cmds;
-  delegate.now            = 0;
+  delegate.width         = size;
+  delegate.toPrint       = cmds;
+  delegate.now           = 0;
   [delegate print];
 }
+
 
 RCT_EXPORT_METHOD(printBarCode:(NSString *) str withType:(NSInteger)
                   nType width:(NSInteger) nWidth heigth:(NSInteger) nHeight
