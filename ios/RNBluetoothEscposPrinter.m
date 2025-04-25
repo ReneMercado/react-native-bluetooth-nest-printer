@@ -569,8 +569,12 @@ RCT_EXPORT_METHOD(printQRCode:(NSString *)content
     ? leftPadding
     : MAX(0, (printerWidth - size) / 2);
 
-  // 6) Renderizar ZXBitMatrix a CGImage
-  CGImageRef cgImage = [[ZXImage imageWithMatrix:result] cgimage];
+    // 6a) Crea una instancia local de ZXImage y reténla
+    ZXImage *zxingImage = [ZXImage imageWithMatrix:result];
+
+    // 6b) Ahora extrae el CGImageRef de ese objeto vivo
+    CGImageRef cgImage = [zxingImage cgimage];
+  
   if (!cgImage) {
     reject(@"ERROR_IN_CREATE_QRCODE", @"Failed to render CGImage from QR matrix", nil);
     return;
