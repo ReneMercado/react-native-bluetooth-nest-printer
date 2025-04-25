@@ -540,7 +540,6 @@ RCT_EXPORT_METHOD(printQRCode:(NSString *)content
 
   // 2) Configuración de hints usando ZXEncodeHints
   ZXEncodeHints *hints = [ZXEncodeHints hints];
-  hints.encoding             = NSUTF8StringEncoding;
   hints.margin               = @0;
   hints.errorCorrectionLevel = [self findCorrectionLevel:correctionLevel];
 
