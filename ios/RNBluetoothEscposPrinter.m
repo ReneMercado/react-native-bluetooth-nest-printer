@@ -5,7 +5,10 @@
 #import "ColumnSplitedString.h"
 #import "PrintColumnBleWriteDelegate.h"
 #import "ImageUtils.h"
+
+// Fix for compatibility with ZXingObjC 3.6.5
 #import <ZXingObjC/ZXingObjC.h>
+
 #import "PrintImageBleWriteDelegate.h"
 @implementation RNBluetoothEscposPrinter
 
