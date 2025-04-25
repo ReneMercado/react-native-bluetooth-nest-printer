@@ -38,43 +38,51 @@ int p6[] = { 0, 0x02 };
 
 
 + (uint8_t *)imageToGreyImage:(UIImage *)image {
+  NSLog(@"[ImageUtils] → imageToGreyImage: image=%@ size=%.0fx%.0f scale=%.1f",
+        image, image.size.width, image.size.height, image.scale);
+
   CGImageRef cgImage = image.CGImage;
+  NSLog(@"[ImageUtils]    cgImage = %p", cgImage);
   if (!cgImage) {
+    NSLog(@"[ImageUtils]    ❌ cgImage es NULL");
     return NULL;
   }
 
   size_t width  = CGImageGetWidth(cgImage);
   size_t height = CGImageGetHeight(cgImage);
-  size_t bytesPerRow = width;         // 1 byte por pixel
-  size_t dataSize    = width * height;
+  NSLog(@"[ImageUtils]    dimensions = %zux%zu", width, height);
 
-  // 1) Reserva buffer para los bytes en gris
+  size_t dataSize = width * height;
   uint8_t *greyData = malloc(dataSize);
+  NSLog(@"[ImageUtils]    malloc greyData = %p (%zu bytes)", greyData, dataSize);
   if (!greyData) {
+    NSLog(@"[ImageUtils]    ❌ malloc falló");
     return NULL;
   }
   memset(greyData, 0, dataSize);
 
-  // 2) Crea espacio de color y contexto en escala de grises
-  CGColorSpaceRef graySpace = CGColorSpaceCreateDeviceGray();
-  CGContextRef context = CGBitmapContextCreate(
+  CGColorSpaceRef graySpace =
+    CGColorSpaceCreateDeviceGray();
+  CGContextRef ctx = CGBitmapContextCreate(
     greyData,
     width,
     height,
-    8,            // bits por componente
-    bytesPerRow,
+    8,
+    width,
     graySpace,
     kCGImageAlphaNone
   );
   CGColorSpaceRelease(graySpace);
-  if (!context) {
+  NSLog(@"[ImageUtils]    CGContext = %p", ctx);
+  if (!ctx) {
+    NSLog(@"[ImageUtils]    ❌ CGContextCreation falló");
     free(greyData);
     return NULL;
   }
 
-  // 3) Dibuja la imagen original en el contexto
-  CGContextDrawImage(context, CGRectMake(0, 0, width, height), cgImage);
-  CGContextRelease(context);
+  CGContextDrawImage(ctx, CGRectMake(0,0,width,height), cgImage);
+  CGContextRelease(ctx);
+  NSLog(@"[ImageUtils]    ✅ dibujado en contexto");
 
   return greyData;
 }
