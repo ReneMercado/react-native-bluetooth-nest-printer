@@ -161,7 +161,7 @@ int p6[] = { 0, 0x02 };
  When ​standard mode​ is enabled, this command is only executed when there is no data in the print buffer. (Line is empty)
  The defined data (​d​) defines each byte of the raster image. Each bit in every byte defines a pixel. A bit set to 1 is printed and a bit set to 0 is not printed.
  If a raster bit image exceeds one line, the excess data is not printed.
- This command feeds as much paper as is required to print the entire raster bit image, regardless of line spacing defined by 1/6” or 1/8” commands.
+ This command feeds as much paper as is required to print the entire raster bit image, regardless of line spacing defined by 1/6" or 1/8" commands.
  After the raster bit image is printed, the print position goes to the beginning of the line.
  The following commands have no effect on a raster bit image:
  Emphasized
@@ -188,39 +188,52 @@ int p6[] = { 0, 0x02 };
  d ​ specifies the bit image data in raster format.
  k ​indicates the number of bytes in the bit image. ​k ​is not transmitted and is there for explanation only.
  **/
-+ (NSData *)eachLinePixToCmd:(unsigned char *)src nWidth:(NSInteger) nWidth nHeight:(NSInteger) nHeight nMode:(NSInteger) nMode
++ (NSData *)eachLinePixToCmd:(unsigned char *)src nWidth:(NSInteger) nWidth nHeight:(NSInteger) nHeight nMode:(NSInteger) nMode leftPadding:(NSInteger) leftPadding
 {
     NSLog(@"SIZE OF SRC: %lu",sizeof(&src));
     NSInteger nBytesPerLine = (int)nWidth/8;
-    unsigned char * data = malloc(nHeight*(8+nBytesPerLine));
-   // const char* srcData = (const char*)[src bytes];
-    NSInteger k = 0;
-   // NSMutableString *toLog = [[NSMutableString alloc] init];
-    for(int i=0;i<nHeight;i++){
-        NSInteger var10 = i*(8+nBytesPerLine);
-         //GS v 0 m xL xH yL yH d1....dk 打印光栅位图
-                data[var10 + 0] = 29;//GS
-                data[var10 + 1] = 118;//v
-                data[var10 + 2] = 48;//0
-                data[var10 + 3] =  (unsigned char)(nMode & 1);
-                data[var10 + 4] =  (unsigned char)(nBytesPerLine % 256);//xL
-                data[var10 + 5] =  (unsigned char)(nBytesPerLine / 256);//xH
-                data[var10 + 6] = 1;//yL
-                data[var10 + 7] = 0;//yH
-//        for(int l=0;l<8;l++){
-//            NSInteger d =data[var10 + l];
-//            [toLog appendFormat:@"%ld,",(long)d];
-//        }
-        
-        for (int j = 0; j < nBytesPerLine; ++j) {
-            data[var10 + 8 + j] = (int) (p0[src[k]] + p1[src[k + 1]] + p2[src[k + 2]] + p3[src[k + 3]] + p4[src[k + 4]] + p5[src[k + 5]] + p6[src[k + 6]] + src[k + 7]);
-            k =k+8;
-             //  [toLog appendFormat:@"%ld,",(long)data[var10+8+j]];
-        }
-       // [toLog appendString:@"\n\r"];
+    NSInteger bytesPerLineWithPadding = nBytesPerLine;
+    
+    // Calculate padding bytes (each byte is 8 pixels)
+    NSInteger paddingBytes = leftPadding / 8;
+    if (leftPadding > 0) {
+        bytesPerLineWithPadding += paddingBytes;
     }
-   // NSLog(@"line datas: %@",toLog);
-    return [NSData dataWithBytes:data length:nHeight*(8+nBytesPerLine)];
+    
+    unsigned char * data = malloc(nHeight*(8+bytesPerLineWithPadding));
+    NSInteger k = 0;
+    
+    for(int i=0; i<nHeight; i++){
+        NSInteger var10 = i*(8+bytesPerLineWithPadding);
+        //GS v 0 m xL xH yL yH d1....dk 打印光栅位图
+        data[var10 + 0] = 29;//GS
+        data[var10 + 1] = 118;//v
+        data[var10 + 2] = 48;//0
+        data[var10 + 3] = (unsigned char)(nMode & 1);
+        data[var10 + 4] = (unsigned char)(bytesPerLineWithPadding % 256);//xL
+        data[var10 + 5] = (unsigned char)(bytesPerLineWithPadding / 256);//xH
+        data[var10 + 6] = 1;//yL
+        data[var10 + 7] = 0;//yH
+        
+        // Add padding bytes (zeros = white space)
+        for (int p = 0; p < paddingBytes; p++) {
+            data[var10 + 8 + p] = 0;
+        }
+        
+        // Add actual image data after padding
+        for (int j = 0; j < nBytesPerLine; ++j) {
+            data[var10 + 8 + paddingBytes + j] = (int)(p0[src[k]] + p1[src[k + 1]] + p2[src[k + 2]] + p3[src[k + 3]] + p4[src[k + 4]] + p5[src[k + 5]] + p6[src[k + 6]] + src[k + 7]);
+            k = k + 8;
+        }
+    }
+    
+    return [NSData dataWithBytes:data length:nHeight*(8+bytesPerLineWithPadding)];
+}
+
++ (NSData *)eachLinePixToCmd:(unsigned char *)src nWidth:(NSInteger) nWidth nHeight:(NSInteger) nHeight nMode:(NSInteger) nMode
+{
+    // Forward to new method with leftPadding=0
+    return [self eachLinePixToCmd:src nWidth:nWidth nHeight:nHeight nMode:nMode leftPadding:0];
 }
 
 +(unsigned char *)format_K_threshold:(unsigned char *) orgpixels
@@ -272,6 +285,11 @@ int p6[] = { 0, 0x02 };
         j+=8;
     }
     return [[NSData alloc] initWithBytes:data length:length];
+}
+
++(NSInteger)defaultWidth {
+    // Return a default width (58mm printer width in pixels)
+    return 384; // Standard 58mm printer width
 }
 
 @end
