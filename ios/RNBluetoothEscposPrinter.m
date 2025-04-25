@@ -8,6 +8,7 @@
 
 // Fix for compatibility with ZXingObjC 3.6.5
 #import <ZXingObjC/ZXingObjC.h>
+#import <ZXingObjC/ZXEncodeHints.h>  
 
 #import "PrintImageBleWriteDelegate.h"
 @implementation RNBluetoothEscposPrinter
@@ -519,68 +520,67 @@ RCT_EXPORT_METHOD(printPic:(NSString *) base64encodeStr withOptions:(NSDictionar
 }
 
 RCT_EXPORT_METHOD(printQRCode:(NSString *)content
-                  withSize:(NSInteger) size
-                  correctionLevel:(NSInteger) correctionLevel
-                  leftPadding:(NSInteger) leftPadding
-                  andResolver:(RCTPromiseResolveBlock) resolve
-                  rejecter:(RCTPromiseRejectBlock) reject)
+                  withSize:(NSInteger)size
+          correctionLevel:(NSInteger)correctionLevel
+              leftPadding:(NSInteger)leftPadding
+               andResolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
 {
   NSLog(@"QRCODE TO PRINT: %@", content);
 
+  // 1) Validación de contenido
   if (content.length == 0) {
     reject(@"QR_CONTENT_EMPTY", @"QR code content cannot be empty", nil);
     return;
   }
 
   NSError *error = nil;
-  // Build a plain NSDictionary of hints
-  NSDictionary *encodeHints = @{
-    ZXEncodeHintTypeCharacterSet : @"UTF-8",
-    ZXEncodeHintTypeMargin       : @0,
-    // ZXEncodeHintTypeErrorCorrection is the correct key for QR error-correction
-    ZXEncodeHintTypeErrorCorrection : [self findCorrectionLevel:correctionLevel]
-  };
 
+  // 2) Configuración de hints usando ZXEncodeHints
+  ZXEncodeHints *hints = [ZXEncodeHints hints];
+  hints.encoding             = NSUTF8StringEncoding;                       // Charset UTF-8
+  hints.margin               = @0;                                        // Sin margen
+  hints.errorCorrectionLevel = [self findCorrectionLevel:correctionLevel]; // Nivel de corrección
+
+  // 3) Generar la matriz de bits del QR
   ZXMultiFormatWriter *writer = [ZXMultiFormatWriter writer];
   ZXBitMatrix *result = [writer encode:content
                                 format:kBarcodeFormatQRCode
                                  width:(int)size
                                 height:(int)size
-                                 hints:encodeHints
+                                 hints:hints
                                  error:&error];
 
+  // 4) Manejo de errores al generar el QR
   if (error || !result) {
-    NSString *domain = error.domain ?: @"Unknown";
-    NSInteger code  = error.code;
-    NSString *desc  = error.localizedDescription ?: @"Unknown error";
-    NSString *debug = [NSString stringWithFormat:@"Content (len:%lu): %@",
-                        (unsigned long)content.length,
-                        content.length > 30
-                          ? [[content substringToIndex:30] stringByAppendingString:@"…"]
-                          : content];
-
     NSString *message = [NSString stringWithFormat:
-      @"QR generation failed. Domain:%@ Code:%ld Msg:%@ — %@",
-      domain, (long)code, desc, debug];
+      @"QR generation failed. Domain:%@ Code:%ld Msg:%@",
+      error.domain ?: @"Unknown",
+      (long)error.code,
+      error.localizedDescription ?: @"Unknown error"];
     NSLog(@"QR Error: %@", message);
     reject(@"ERROR_IN_CREATE_QRCODE", message, error);
     return;
   }
 
-  // center if no explicit padding
-  NSInteger printerWidth     = [ImageUtils defaultWidth];
-  NSInteger appliedLeftPad   = leftPadding > 0
-                                ? leftPadding
-                                : MAX(0, (printerWidth - size) / 2);
+  // 5) Determinar padding lateral para centrar si no se pasó explícito
+  NSInteger printerWidth   = [ImageUtils defaultWidth];
+  NSInteger appliedLeftPad = leftPadding > 0
+                              ? leftPadding
+                              : MAX(0, (printerWidth - size) / 2);
 
+  // 6) Convertir ZXBitMatrix a comandos de impresión
   CGImageRef cgImage = [[ZXImage imageWithMatrix:result] cgimage];
-  uint8_t *gray      = [ImageUtils imageToGreyImage:
-                         [UIImage imageWithCGImage:cgImage]];
-  unsigned char *bw  = [ImageUtils format_K_threshold:
-                         gray width:size height:size];
+  uint8_t *gray      = [ImageUtils imageToGreyImage:[UIImage imageWithCGImage:cgImage]];
+  unsigned char *bw  = [ImageUtils format_K_threshold:gray width:size height:size];
   NSData *cmds       = [ImageUtils eachLinePixToCmd:
-                         bw nWidth:size nHeight:size nMode:0 leftPadding:appliedLeftPad];
+                         bw
+                         nWidth:size
+                         nHeight:size
+                         nMode:0
+                    leftPadding:appliedLeftPad];
 
+  // 7) Enviar al dispositivo vía BLE
   PrintImageBleWriteDelegate *delegate = [[PrintImageBleWriteDelegate alloc] init];
   delegate.pendingResolve = resolve;
   delegate.pendingReject  = reject;
@@ -589,6 +589,7 @@ RCT_EXPORT_METHOD(printQRCode:(NSString *)content
   delegate.now           = 0;
   [delegate print];
 }
+
 
 
 RCT_EXPORT_METHOD(printBarCode:(NSString *) str withType:(NSInteger)
