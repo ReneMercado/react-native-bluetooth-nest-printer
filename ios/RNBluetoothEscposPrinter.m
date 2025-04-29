@@ -479,45 +479,146 @@ RCT_EXPORT_METHOD(printPic:(NSString *) base64encodeStr withOptions:(NSDictionar
                   resolver:(RCTPromiseResolveBlock) resolve
                   rejecter:(RCTPromiseRejectBlock) reject)
 {
-    if(RNBluetoothManager.isConnected){
-        @try{
-            NSInteger nWidth = [[options valueForKey:@"width"] integerValue];
-            if(!nWidth) nWidth = _deviceWidth;
-            //TODO:need to handel param "left" in the options.
-            NSInteger paddingLeft = [[options valueForKey:@"left"] integerValue];
-            if(!paddingLeft) paddingLeft = 0;
-            NSData *decoded = [[NSData alloc] initWithBase64EncodedString:base64encodeStr options:0 ];
-            UIImage *srcImage = [[UIImage alloc] initWithData:decoded scale:1];
-            NSData *jpgData = UIImageJPEGRepresentation(srcImage, 1);
-            UIImage *jpgImage = [[UIImage alloc] initWithData:jpgData];
-            //mBitmap.getHeight() * width / mBitmap.getWidth();
-            NSInteger imgHeight = jpgImage.size.height;
-            NSInteger imagWidth = jpgImage.size.width;
-            NSInteger width = nWidth;//((int)(((nWidth*0.86)+7)/8))*8-7;
-            CGSize size = CGSizeMake(width, imgHeight*width/imagWidth);
-            UIImage *scaled = [ImageUtils imageWithImage:jpgImage scaledToFillSize:size];
-            if(paddingLeft>0){
-                scaled = [ImageUtils imagePadLeft:paddingLeft withSource:scaled];
-                size =[scaled size];
+    NSLog(@"[printPic] Starting printPic with options: %@", options);
+    
+    if(!RNBluetoothManager.isConnected){
+        NSLog(@"[printPic] Error: Bluetooth not connected");
+        reject(@"BLUETOOTH_NOT_CONNECTED", @"Bluetooth printer is not connected", nil);
+        return;
+    }
+    
+    @try{
+        // 1) Parse options
+        NSInteger nWidth = [[options valueForKey:@"width"] integerValue];
+        if(!nWidth) {
+            nWidth = _deviceWidth;
+            NSLog(@"[printPic] Using default device width: %ld", (long)nWidth);
+        } else {
+            NSLog(@"[printPic] Using custom width: %ld", (long)nWidth);
+        }
+        
+        NSInteger paddingLeft = [[options valueForKey:@"left"] integerValue];
+        if(!paddingLeft) {
+            paddingLeft = 0;
+            NSLog(@"[printPic] No left padding specified, using 0");
+        } else {
+            NSLog(@"[printPic] Using left padding: %ld", (long)paddingLeft);
+        }
+
+        // 2) Decode base64 image
+        NSLog(@"[printPic] Decoding base64 image string (length: %lu)", (unsigned long)base64encodeStr.length);
+        NSData *decoded = [[NSData alloc] initWithBase64EncodedString:base64encodeStr options:0];
+        if(!decoded) {
+            NSLog(@"[printPic] Error: Failed to decode base64 string");
+            reject(@"INVALID_BASE64", @"Failed to decode base64 image data", nil);
+            return;
+        }
+        NSLog(@"[printPic] Successfully decoded base64 to data (length: %lu)", (unsigned long)decoded.length);
+
+        // 3) Create source image
+        UIImage *srcImage = [[UIImage alloc] initWithData:decoded scale:1];
+        if(!srcImage) {
+            NSLog(@"[printPic] Error: Failed to create UIImage from decoded data");
+            reject(@"INVALID_IMAGE_DATA", @"Failed to create image from decoded data", nil);
+            return;
+        }
+        NSLog(@"[printPic] Created source image with size: %@", NSStringFromCGSize(srcImage.size));
+
+        // 4) Convert to JPEG
+        NSData *jpgData = UIImageJPEGRepresentation(srcImage, 1);
+        if(!jpgData) {
+            NSLog(@"[printPic] Error: Failed to convert image to JPEG");
+            reject(@"JPEG_CONVERSION_FAILED", @"Failed to convert image to JPEG format", nil);
+            return;
+        }
+        NSLog(@"[printPic] Converted to JPEG (length: %lu)", (unsigned long)jpgData.length);
+
+        // 5) Create JPEG image
+        UIImage *jpgImage = [[UIImage alloc] initWithData:jpgData];
+        if(!jpgImage) {
+            NSLog(@"[printPic] Error: Failed to create image from JPEG data");
+            reject(@"INVALID_JPEG_DATA", @"Failed to create image from JPEG data", nil);
+            return;
+        }
+
+        // 6) Calculate dimensions
+        NSInteger imgHeight = jpgImage.size.height;
+        NSInteger imagWidth = jpgImage.size.width;
+        NSInteger width = nWidth;
+        NSLog(@"[printPic] Original image dimensions - Width: %ld, Height: %ld", (long)imagWidth, (long)imgHeight);
+
+        // 7) Calculate scaled size
+        CGSize size = CGSizeMake(width, imgHeight*width/imagWidth);
+        NSLog(@"[printPic] Scaled dimensions - Width: %f, Height: %f", size.width, size.height);
+
+        // 8) Scale image
+        UIImage *scaled = [ImageUtils imageWithImage:jpgImage scaledToFillSize:size];
+        if(!scaled) {
+            NSLog(@"[printPic] Error: Failed to scale image");
+            reject(@"SCALING_FAILED", @"Failed to scale image to target size", nil);
+            return;
+        }
+        NSLog(@"[printPic] Successfully scaled image");
+
+        // 9) Apply padding if needed
+        if(paddingLeft > 0) {
+            NSLog(@"[printPic] Applying left padding: %ld", (long)paddingLeft);
+            scaled = [ImageUtils imagePadLeft:paddingLeft withSource:scaled];
+            if(!scaled) {
+                NSLog(@"[printPic] Error: Failed to apply left padding");
+                reject(@"PADDING_FAILED", @"Failed to apply left padding to image", nil);
+                return;
             }
-            
-            unsigned char * graImage = [ImageUtils imageToGreyImage:scaled];
-            unsigned char * formatedData = [ImageUtils format_K_threshold:graImage width:size.width height:size.height];
-            NSData *dataToPrint = [ImageUtils eachLinePixToCmd:formatedData nWidth:size.width nHeight:size.height nMode:0];
-            PrintImageBleWriteDelegate *delegate = [[PrintImageBleWriteDelegate alloc] init];
-            delegate.pendingResolve = resolve;
-            delegate.pendingReject = reject;
-            delegate.width = width;
-            delegate.toPrint  = dataToPrint;
-            delegate.now = 0;
-            [delegate print];
+            size = [scaled size];
+            NSLog(@"[printPic] New dimensions after padding - Width: %f, Height: %f", size.width, size.height);
         }
-        @catch(NSException *e){
-            NSLog(@"ERROR IN PRINTING IMG: %@",[e callStackSymbols]);
-              reject(@"COMMAND_NOT_SEND",@"COMMAND_NOT_SEND",nil);
+
+        // 10) Convert to grayscale
+        NSLog(@"[printPic] Converting to grayscale");
+        unsigned char *graImage = [ImageUtils imageToGreyImage:scaled];
+        if(!graImage) {
+            NSLog(@"[printPic] Error: Failed to convert image to grayscale");
+            reject(@"GRAYSCALE_CONVERSION_FAILED", @"Failed to convert image to grayscale", nil);
+            return;
         }
-    }else{
-        reject(@"COMMAND_NOT_SEND",@"COMMAND_NOT_SEND",nil);
+
+        // 11) Apply threshold formatting
+        NSLog(@"[printPic] Applying threshold formatting");
+        unsigned char *formatedData = [ImageUtils format_K_threshold:graImage width:size.width height:size.height];
+        if(!formatedData) {
+            NSLog(@"[printPic] Error: Failed to apply threshold formatting");
+            free(graImage);
+            reject(@"THRESHOLD_FORMATTING_FAILED", @"Failed to apply threshold formatting to image", nil);
+            return;
+        }
+        free(graImage);
+
+        // 12) Generate print commands
+        NSLog(@"[printPic] Generating print commands");
+        NSData *dataToPrint = [ImageUtils eachLinePixToCmd:formatedData nWidth:size.width nHeight:size.height nMode:0];
+        if(!dataToPrint) {
+            NSLog(@"[printPic] Error: Failed to generate print commands");
+            free(formatedData);
+            reject(@"PRINT_COMMAND_GENERATION_FAILED", @"Failed to generate print commands from image data", nil);
+            return;
+        }
+        free(formatedData);
+        NSLog(@"[printPic] Generated print commands (length: %lu)", (unsigned long)dataToPrint.length);
+
+        // 13) Setup delegate and print
+        PrintImageBleWriteDelegate *delegate = [[PrintImageBleWriteDelegate alloc] init];
+        delegate.pendingResolve = resolve;
+        delegate.pendingReject = reject;
+        delegate.width = width;
+        delegate.toPrint = dataToPrint;
+        delegate.now = 0;
+
+        NSLog(@"[printPic] Starting print process");
+        [delegate print];
+    }
+    @catch(NSException *e){
+        NSLog(@"[printPic] Exception occurred: %@\nStack trace: %@", e, [e callStackSymbols]);
+        reject(@"PRINT_PROCESSING_ERROR", [NSString stringWithFormat:@"Exception during image processing: %@", e.reason], e);
     }
 }
 
