@@ -483,7 +483,7 @@ RCT_EXPORT_METHOD(printPic:(NSString *) base64encodeStr withOptions:(NSDictionar
     
     if(!RNBluetoothManager.isConnected){
         NSLog(@"[printPic] Error: Bluetooth not connected");
-        reject(@"COMMAND_NOT_SEND",@"COMMAND_NOT_SEND",nil);
+        reject(@"BLUETOOTH_NOT_CONNECTED", @"Bluetooth printer is not connected", nil);
         return;
     }
     
@@ -510,7 +510,7 @@ RCT_EXPORT_METHOD(printPic:(NSString *) base64encodeStr withOptions:(NSDictionar
         NSData *decoded = [[NSData alloc] initWithBase64EncodedString:base64encodeStr options:0];
         if(!decoded) {
             NSLog(@"[printPic] Error: Failed to decode base64 string");
-            reject(@"INVALID_IMAGE", @"Failed to decode base64 image", nil);
+            reject(@"INVALID_BASE64", @"Failed to decode base64 image data", nil);
             return;
         }
         NSLog(@"[printPic] Successfully decoded base64 to data (length: %lu)", (unsigned long)decoded.length);
@@ -519,7 +519,7 @@ RCT_EXPORT_METHOD(printPic:(NSString *) base64encodeStr withOptions:(NSDictionar
         UIImage *srcImage = [[UIImage alloc] initWithData:decoded scale:1];
         if(!srcImage) {
             NSLog(@"[printPic] Error: Failed to create UIImage from decoded data");
-            reject(@"INVALID_IMAGE", @"Failed to create image from decoded data", nil);
+            reject(@"INVALID_IMAGE_DATA", @"Failed to create image from decoded data", nil);
             return;
         }
         NSLog(@"[printPic] Created source image with size: %@", NSStringFromCGSize(srcImage.size));
@@ -528,7 +528,7 @@ RCT_EXPORT_METHOD(printPic:(NSString *) base64encodeStr withOptions:(NSDictionar
         NSData *jpgData = UIImageJPEGRepresentation(srcImage, 1);
         if(!jpgData) {
             NSLog(@"[printPic] Error: Failed to convert image to JPEG");
-            reject(@"INVALID_IMAGE", @"Failed to convert image to JPEG", nil);
+            reject(@"JPEG_CONVERSION_FAILED", @"Failed to convert image to JPEG format", nil);
             return;
         }
         NSLog(@"[printPic] Converted to JPEG (length: %lu)", (unsigned long)jpgData.length);
@@ -537,7 +537,7 @@ RCT_EXPORT_METHOD(printPic:(NSString *) base64encodeStr withOptions:(NSDictionar
         UIImage *jpgImage = [[UIImage alloc] initWithData:jpgData];
         if(!jpgImage) {
             NSLog(@"[printPic] Error: Failed to create image from JPEG data");
-            reject(@"INVALID_IMAGE", @"Failed to create image from JPEG data", nil);
+            reject(@"INVALID_JPEG_DATA", @"Failed to create image from JPEG data", nil);
             return;
         }
 
@@ -555,7 +555,7 @@ RCT_EXPORT_METHOD(printPic:(NSString *) base64encodeStr withOptions:(NSDictionar
         UIImage *scaled = [ImageUtils imageWithImage:jpgImage scaledToFillSize:size];
         if(!scaled) {
             NSLog(@"[printPic] Error: Failed to scale image");
-            reject(@"INVALID_IMAGE", @"Failed to scale image", nil);
+            reject(@"SCALING_FAILED", @"Failed to scale image to target size", nil);
             return;
         }
         NSLog(@"[printPic] Successfully scaled image");
@@ -566,7 +566,7 @@ RCT_EXPORT_METHOD(printPic:(NSString *) base64encodeStr withOptions:(NSDictionar
             scaled = [ImageUtils imagePadLeft:paddingLeft withSource:scaled];
             if(!scaled) {
                 NSLog(@"[printPic] Error: Failed to apply left padding");
-                reject(@"INVALID_IMAGE", @"Failed to apply left padding", nil);
+                reject(@"PADDING_FAILED", @"Failed to apply left padding to image", nil);
                 return;
             }
             size = [scaled size];
@@ -578,7 +578,7 @@ RCT_EXPORT_METHOD(printPic:(NSString *) base64encodeStr withOptions:(NSDictionar
         unsigned char *graImage = [ImageUtils imageToGreyImage:scaled];
         if(!graImage) {
             NSLog(@"[printPic] Error: Failed to convert image to grayscale");
-            reject(@"INVALID_IMAGE", @"Failed to convert image to grayscale", nil);
+            reject(@"GRAYSCALE_CONVERSION_FAILED", @"Failed to convert image to grayscale", nil);
             return;
         }
 
@@ -588,7 +588,7 @@ RCT_EXPORT_METHOD(printPic:(NSString *) base64encodeStr withOptions:(NSDictionar
         if(!formatedData) {
             NSLog(@"[printPic] Error: Failed to apply threshold formatting");
             free(graImage);
-            reject(@"INVALID_IMAGE", @"Failed to apply threshold formatting", nil);
+            reject(@"THRESHOLD_FORMATTING_FAILED", @"Failed to apply threshold formatting to image", nil);
             return;
         }
         free(graImage);
@@ -599,7 +599,7 @@ RCT_EXPORT_METHOD(printPic:(NSString *) base64encodeStr withOptions:(NSDictionar
         if(!dataToPrint) {
             NSLog(@"[printPic] Error: Failed to generate print commands");
             free(formatedData);
-            reject(@"INVALID_IMAGE", @"Failed to generate print commands", nil);
+            reject(@"PRINT_COMMAND_GENERATION_FAILED", @"Failed to generate print commands from image data", nil);
             return;
         }
         free(formatedData);
@@ -618,7 +618,7 @@ RCT_EXPORT_METHOD(printPic:(NSString *) base64encodeStr withOptions:(NSDictionar
     }
     @catch(NSException *e){
         NSLog(@"[printPic] Exception occurred: %@\nStack trace: %@", e, [e callStackSymbols]);
-        reject(@"COMMAND_NOT_SEND",@"COMMAND_NOT_SEND",nil);
+        reject(@"PRINT_PROCESSING_ERROR", [NSString stringWithFormat:@"Exception during image processing: %@", e.reason], e);
     }
 }
 
