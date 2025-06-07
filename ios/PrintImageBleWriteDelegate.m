@@ -42,20 +42,35 @@
 -(void) print
 {
     @synchronized (self) {
-     NSInteger sizePerLine = (int)(_width/8);
-   // do{
-//        if(sizePerLine+_now>=[_toPrint length]){
-//            sizePerLine = [_toPrint length] - _now;
-//        }
-       // if(sizePerLine>0){
-            NSData *subData = [_toPrint subdataWithRange:NSMakeRange(_now, sizePerLine)];
-            NSLog(@"Write data:%@",subData);
-            [RNBluetoothManager writeValue:subData withDelegate:self];
-        //}
-        _now = _now+sizePerLine;
-        [NSThread sleepForTimeInterval:0.01f];
+        NSInteger sizePerLine = (int)(_width/8);
         
+        // Add bounds checking to prevent crash
+        if (_now >= [_toPrint length]) {
+            NSLog(@"Print completed - no more data");
+            return;
+        }
+        
+        // Ensure we don't read beyond the data length
+        NSInteger remainingBytes = [_toPrint length] - _now;
+        if (sizePerLine > remainingBytes) {
+            sizePerLine = remainingBytes;
+        }
+        
+        // Additional safety check
+        if (sizePerLine <= 0) {
+            NSLog(@"Invalid sizePerLine: %ld", (long)sizePerLine);
+            return;
+        }
+        
+        NSData *subData = [_toPrint subdataWithRange:NSMakeRange(_now, sizePerLine)];
+        NSLog(@"Write data: %@ (size: %ld, _now: %ld, total: %ld)", 
+              subData, (long)sizePerLine, (long)_now, (long)[_toPrint length]);
+        
+        [RNBluetoothManager writeValue:subData withDelegate:self];
+        _now = _now + sizePerLine;
+        
+        // Increase sleep time for iOS Bluetooth stability
+        [NSThread sleepForTimeInterval:0.05f];  // Increased from 0.01f to 0.05f
     }
-    //}while(_now<[_toPrint length]);
 }
 @end
