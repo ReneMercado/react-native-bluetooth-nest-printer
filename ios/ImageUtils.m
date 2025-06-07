@@ -204,40 +204,63 @@ int p6[] = { 0, 0x02 };
 +(unsigned char *)format_K_threshold:(unsigned char *) orgpixels
                         width:(NSInteger) xsize height:(NSInteger) ysize
 {
+    NSLog(@"[ImageUtils] → format_K_threshold: size=%ldx%ld", (long)xsize, (long)ysize);
+    
     unsigned char * despixels = malloc(xsize*ysize);
     int graytotal = 0;
     int k = 0;
+    int minGray = 255, maxGray = 0;
     
     int i;
     int j;
     int gray;
+    
+    // First pass: calculate statistics
     for(i = 0; i < ysize; ++i) {
         for(j = 0; j < xsize; ++j) {
             gray = orgpixels[k] & 255;
             graytotal += gray;
+            if(gray < minGray) minGray = gray;
+            if(gray > maxGray) maxGray = gray;
             ++k;
         }
     }
     
     int grayave = graytotal / ysize / xsize;
+    
+    // Use improved threshold: midpoint between average and minimum for better contrast
+    // This helps with logos that have dark content on light backgrounds
+    int threshold = (grayave + minGray) / 2;
+    
+    // Ensure minimum contrast
+    if(maxGray - minGray < 50) {
+        threshold = grayave; // Fall back to average if low contrast
+    }
+    
+    NSLog(@"[ImageUtils] Gray stats - Min:%d, Max:%d, Avg:%d, Threshold:%d", 
+          minGray, maxGray, grayave, threshold);
+    
     k = 0;
-   // NSMutableString *logStr = [[NSMutableString alloc]init];
-   // int oneCount = 0;
+    int blackPixels = 0, whitePixels = 0;
+    
+    // Second pass: apply threshold
     for(i = 0; i < ysize; ++i) {
         for(j = 0; j < xsize; ++j) {
             gray = orgpixels[k] & 255;
-            if(gray > grayave) {
-                despixels[k] = 0;
+            if(gray > threshold) {
+                despixels[k] = 0; // White pixel (don't print)
+                whitePixels++;
             } else {
-                despixels[k] = 1;
-               // oneCount++;
+                despixels[k] = 1; // Black pixel (print)
+                blackPixels++;
             }
-            
             ++k;
-           // [logStr appendFormat:@"%d,",despixels[k]];
         }
     }
-   // NSLog(@"despixels [with 1 count:%d]: %@",oneCount,logStr);
+    
+    NSLog(@"[ImageUtils] Threshold result - Black pixels: %d, White pixels: %d (%.1f%% black)", 
+          blackPixels, whitePixels, (blackPixels * 100.0) / (blackPixels + whitePixels));
+    
     return despixels;
 }
 +(NSData *)pixToTscCmd:(uint8_t *)src width:(NSInteger) width
