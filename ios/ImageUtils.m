@@ -107,6 +107,43 @@ int p6[] = { 0, 0x02 };
   NSLog(@"[ImageUtils]    drawing image into context...");
   CGContextDrawImage(ctx, CGRectMake(0,0,width,height), cgImage);
   CGContextRelease(ctx);
+  
+  // Sample and log some pixel values to debug conversion
+  NSLog(@"[ImageUtils]    sampling pixel values...");
+  int sampleSize = MIN(20, (int)dataSize);
+  NSMutableString *pixelSample = [NSMutableString string];
+  
+  int whiteCount = 0, blackCount = 0, grayCount = 0;
+  for (int i = 0; i < sampleSize; i++) {
+    uint8_t pixelValue = greyData[i];
+    [pixelSample appendFormat:@"%d ", pixelValue];
+    
+    if (pixelValue < 85) blackCount++;
+    else if (pixelValue > 170) whiteCount++;
+    else grayCount++;
+  }
+  
+  NSLog(@"[ImageUtils]    first %d pixels: %@", sampleSize, pixelSample);
+  NSLog(@"[ImageUtils]    quick analysis - Black(<85): %d, Gray(85-170): %d, White(>170): %d", 
+        blackCount, grayCount, whiteCount);
+  
+  // Sample from middle and end too
+  if (dataSize > 1000) {
+    int midIndex = (int)dataSize / 2;
+    NSMutableString *midSample = [NSMutableString string];
+    for (int i = 0; i < 10 && (midIndex + i) < dataSize; i++) {
+      [midSample appendFormat:@"%d ", greyData[midIndex + i]];
+    }
+    NSLog(@"[ImageUtils]    middle 10 pixels: %@", midSample);
+    
+    int endIndex = (int)dataSize - 10;
+    NSMutableString *endSample = [NSMutableString string];
+    for (int i = 0; i < 10 && (endIndex + i) < dataSize; i++) {
+      [endSample appendFormat:@"%d ", greyData[endIndex + i]];
+    }
+    NSLog(@"[ImageUtils]    last 10 pixels: %@", endSample);
+  }
+
   NSLog(@"[ImageUtils]    ✅ successfully converted to grayscale (%zu bytes)", dataSize);
 
   return greyData;
