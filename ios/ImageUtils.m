@@ -108,33 +108,8 @@ int p6[] = { 0, 0x02 };
   CGContextDrawImage(ctx, CGRectMake(0,0,width,height), cgImage);
   CGContextRelease(ctx);
   
-  // ⭐ ANDROID-STYLE ENHANCEMENT: Apply contrast enhancement for light images
-  // This helps with logos that appear very light in the original
-  NSLog(@"[ImageUtils]    applying contrast enhancement for better logo detection...");
-  
-  for (size_t i = 0; i < dataSize; i++) {
-    uint8_t originalValue = greyData[i];
-    
-    // Apply contrast stretch: enhance the difference between light and dark areas
-    // This is similar to what Android's ColorMatrix naturally does
-    float normalized = originalValue / 255.0f;
-    
-    // Apply gamma correction to darken mid-tones (good for logos) - REDUCED
-    float gamma = 0.85f; // Less aggressive gamma (was 0.7)
-    float enhanced = powf(normalized, gamma);
-    
-    // Apply contrast enhancement - REDUCED
-    float contrast = 1.2f; // Less aggressive contrast (was 1.5)
-    enhanced = (enhanced - 0.5f) * contrast + 0.5f;
-    
-    // Clamp to valid range
-    enhanced = fmaxf(0.0f, fminf(1.0f, enhanced));
-    
-    greyData[i] = (uint8_t)(enhanced * 255.0f);
-  }
-  
   // Sample and log some pixel values to debug conversion
-  NSLog(@"[ImageUtils]    sampling pixel values after enhancement...");
+  NSLog(@"[ImageUtils]    sampling pixel values...");
   int sampleSize = MIN(20, (int)dataSize);
   NSMutableString *pixelSample = [NSMutableString string];
   
@@ -148,8 +123,8 @@ int p6[] = { 0, 0x02 };
     else grayCount++;
   }
   
-  NSLog(@"[ImageUtils]    first %d pixels (enhanced): %@", sampleSize, pixelSample);
-  NSLog(@"[ImageUtils]    enhanced analysis - Black(<85): %d, Gray(85-170): %d, White(>170): %d", 
+  NSLog(@"[ImageUtils]    first %d pixels: %@", sampleSize, pixelSample);
+  NSLog(@"[ImageUtils]    quick analysis - Black(<85): %d, Gray(85-170): %d, White(>170): %d", 
         blackCount, grayCount, whiteCount);
   
   // Sample from middle and end too
@@ -159,17 +134,17 @@ int p6[] = { 0, 0x02 };
     for (int i = 0; i < 10 && (midIndex + i) < dataSize; i++) {
       [midSample appendFormat:@"%d ", greyData[midIndex + i]];
     }
-    NSLog(@"[ImageUtils]    middle 10 pixels (enhanced): %@", midSample);
+    NSLog(@"[ImageUtils]    middle 10 pixels: %@", midSample);
     
     int endIndex = (int)dataSize - 10;
     NSMutableString *endSample = [NSMutableString string];
     for (int i = 0; i < 10 && (endIndex + i) < dataSize; i++) {
       [endSample appendFormat:@"%d ", greyData[endIndex + i]];
     }
-    NSLog(@"[ImageUtils]    last 10 pixels (enhanced): %@", endSample);
+    NSLog(@"[ImageUtils]    last 10 pixels: %@", endSample);
   }
 
-  NSLog(@"[ImageUtils]    ✅ successfully converted to enhanced grayscale (%zu bytes)", dataSize);
+  NSLog(@"[ImageUtils]    ✅ successfully converted to grayscale (%zu bytes)", dataSize);
 
   return greyData;
 }
@@ -402,11 +377,23 @@ int p6[] = { 0, 0x02 };
     
     int grayave = graytotal / (xsize * ysize);
     
-    // ⭐ ANDROID LOGIC: Use only average as threshold (like Android does)
-    int threshold = grayave;
+    // ⭐ IMPROVED THRESHOLD: Better handling for low-contrast images
+    int threshold;
+    int grayRange = maxGray - minGray;
     
-    NSLog(@"[ImageUtils]    Gray stats - Min:%d, Max:%d, Avg:%d, Threshold:%d (ANDROID-STYLE)", 
-          minGray, maxGray, grayave, threshold);
+    if (grayRange < 50) {
+        // Low contrast image - use a more aggressive threshold
+        // For images where everything is very light (like your logo), we need to be more aggressive
+        threshold = minGray + (grayRange * 0.3f); // Use 30% from minimum instead of average
+        NSLog(@"[ImageUtils]    LOW CONTRAST detected (range=%d), using aggressive threshold", grayRange);
+    } else {
+        // Normal contrast - use Android-style average
+        threshold = grayave;
+        NSLog(@"[ImageUtils]    NORMAL CONTRAST (range=%d), using average threshold", grayRange);
+    }
+    
+    NSLog(@"[ImageUtils]    Gray stats - Min:%d, Max:%d, Avg:%d, Range:%d, Threshold:%d", 
+          minGray, maxGray, grayave, grayRange, threshold);
     
     // Second pass: apply threshold
     k = 0;
