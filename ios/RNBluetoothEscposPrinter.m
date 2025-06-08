@@ -534,8 +534,8 @@ RCT_EXPORT_METHOD(printPic:(NSString *) base64encodeStr withOptions:(NSDictionar
         NSInteger width = nWidth;//((int)(((nWidth*0.86)+7)/8))*8-7;
         CGSize size = CGSizeMake(width, imgHeight*width/imagWidth);
         UIImage *scaled = [ImageUtils imageWithImage:jpgImage scaledToFillSize:size];
-        if(leftPadding > 0){
-            scaled = [ImageUtils imagePadLeft:leftPadding withSource:scaled];
+        if(paddingLeft > 0){
+            scaled = [ImageUtils imagePadLeft:paddingLeft withSource:scaled];
             size = [scaled size];
         }
         
