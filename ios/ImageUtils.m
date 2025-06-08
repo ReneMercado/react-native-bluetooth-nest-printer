@@ -165,40 +165,82 @@ int p6[] = { 0, 0x02 };
   
   CGContextRelease(rgbContext);
 
-  // Now convert RGB to grayscale manually (simple luminance formula)
-  size_t grayDataSize = width * height;
-  uint8_t *greyData = malloc(grayDataSize);
-  if (!greyData) {
-    NSLog(@"[ImageUtils]    ❌ malloc failed for grayscale data");
+  // ⭐ MUCH SIMPLER: Use Core Image to convert to grayscale directly
+  NSLog(@"[ImageUtils]    Using Core Image CIColorMonochrome for grayscale conversion...");
+  
+  // Create UIImage from RGB data for Core Image processing
+  CGColorSpaceRef rgbColorSpaceForImage = CGColorSpaceCreateDeviceRGB();
+  CGDataProviderRef dataProvider = CGDataProviderCreateWithData(NULL, rgbData, rgbDataSize, NULL);
+  CGImageRef rgbImageRef = CGImageCreate(
+    width, height, 8, 32, width * 4,
+    rgbColorSpaceForImage, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big,
+    dataProvider, NULL, false, kCGRenderingIntentDefault
+  );
+  
+  CGColorSpaceRelease(rgbColorSpaceForImage);
+  CGDataProviderRelease(dataProvider);
+  
+  if (!rgbImageRef) {
+    NSLog(@"[ImageUtils]    ❌ Failed to create CGImage from RGB data");
     free(rgbData);
     return NULL;
   }
   
-  NSLog(@"[ImageUtils]    Converting RGB to grayscale manually...");
-  for (size_t i = 0; i < width * height; i++) {
-    int idx = i * 4;
-    uint8_t r = rgbData[idx];
-    uint8_t g = rgbData[idx + 1]; 
-    uint8_t b = rgbData[idx + 2];
-    uint8_t a = rgbData[idx + 3]; // Get alpha too
-    
-    // ⭐ DEBUG: Check if this is a non-white pixel  
-    if (i < 10 && (r < 250 || g < 250 || b < 250)) {
-      NSLog(@"[ImageUtils]    NON-WHITE pixel %zu: R=%d, G=%d, B=%d, A=%d", i, r, g, b, a);
-    }
-    
-    // Standard luminance formula (same as Android)
-    uint8_t gray = (uint8_t)(0.299 * r + 0.587 * g + 0.114 * b);
-    greyData[i] = gray;
-    
-    // ⭐ DEBUG: Log conversion for first few non-white pixels
-    if (i < 10 && gray < 250) {
-      NSLog(@"[ImageUtils]    RGB[%d,%d,%d] -> Gray=%d", r, g, b, gray);
-    }
+  // Apply monochrome filter using Core Image
+  CIContext *ciContext = [CIContext contextWithOptions:nil];
+  CIImage *inputImage = [CIImage imageWithCGImage:rgbImageRef];
+  
+  CIFilter *monochromeFilter = [CIFilter filterWithName:@"CIColorMonochrome"];
+  [monochromeFilter setValue:inputImage forKey:kCIInputImageKey];
+  [monochromeFilter setValue:[CIColor colorWithRed:0.7 green:0.7 blue:0.7] forKey:@"inputColor"]; // Neutral gray
+  [monochromeFilter setValue:@1.0 forKey:@"inputIntensity"]; // Full intensity
+  
+  CIImage *outputImage = [monochromeFilter outputImage];
+  CGImageRef monochromeImageRef = [ciContext createCGImage:outputImage fromRect:outputImage.extent];
+  
+  CGImageRelease(rgbImageRef);
+  
+  if (!monochromeImageRef) {
+    NSLog(@"[ImageUtils]    ❌ Core Image monochrome filter failed");
+    free(rgbData);
+    return NULL;
   }
   
-  free(rgbData);
+  NSLog(@"[ImageUtils]    ✅ Core Image monochrome conversion successful");
+
+  // Now extract grayscale data from the processed image
+  size_t grayDataSize = width * height;
+  uint8_t *greyData = malloc(grayDataSize);
+  if (!greyData) {
+    NSLog(@"[ImageUtils]    ❌ malloc failed for grayscale data");
+    CGImageRelease(monochromeImageRef);
+    free(rgbData);
+    return NULL;
+  }
   
+  // Create grayscale context to extract data
+  CGColorSpaceRef graySpace = CGColorSpaceCreateDeviceGray();
+  CGContextRef grayContext = CGBitmapContextCreate(
+    greyData, width, height, 8, width,
+    graySpace, kCGImageAlphaNone
+  );
+  
+  CGColorSpaceRelease(graySpace);
+  
+  if (!grayContext) {
+    NSLog(@"[ImageUtils]    ❌ Failed to create grayscale context");
+    free(greyData);
+    CGImageRelease(monochromeImageRef);
+    free(rgbData);
+    return NULL;
+  }
+  
+  // Draw monochrome image into grayscale context
+  CGContextDrawImage(grayContext, CGRectMake(0, 0, width, height), monochromeImageRef);
+  CGContextRelease(grayContext);
+  CGImageRelease(monochromeImageRef);
+  free(rgbData);
+
   // Sample grayscale data - IMPROVED to find non-white pixels
   NSLog(@"[ImageUtils]    SAMPLING final grayscale data:");
   NSMutableString *graySample = [NSMutableString string];
