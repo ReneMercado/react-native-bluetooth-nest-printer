@@ -525,7 +525,16 @@ RCT_EXPORT_METHOD(printPic:(NSString *) base64encodeStr withOptions:(NSDictionar
         NSLog(@"[printPic] Created source image with size: %@", NSStringFromCGSize(srcImage.size));
 
         // ⭐ NEW: Convert to JPEG first (like the working fork)
-        NSData *jpgData = UIImageJPEGRepresentation(srcImage, 1);
+        // But first, render on white background to handle transparency
+        UIGraphicsBeginImageContextWithOptions(srcImage.size, YES, srcImage.scale);
+        CGContextRef context = UIGraphicsGetCurrentContext();
+        CGContextSetFillColorWithColor(context, [[UIColor whiteColor] CGColor]);
+        CGContextFillRect(context, CGRectMake(0, 0, srcImage.size.width, srcImage.size.height));
+        [srcImage drawInRect:CGRectMake(0, 0, srcImage.size.width, srcImage.size.height)];
+        UIImage *opaqueImage = UIGraphicsGetImageFromCurrentImageContext();
+        UIGraphicsEndImageContext();
+        
+        NSData *jpgData = UIImageJPEGRepresentation(opaqueImage, 1);
         UIImage *jpgImage = [[UIImage alloc] initWithData:jpgData];
         
         //mBitmap.getHeight() * width / mBitmap.getWidth();
