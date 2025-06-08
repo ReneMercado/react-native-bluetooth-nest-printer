@@ -77,189 +77,136 @@ int p6[] = { 0, 0x02 };
     return NULL;
   }
 
-  // ⭐ ANDROID-STYLE: Handle transparency by rendering on WHITE background first
-  NSLog(@"[ImageUtils]    creating image with WHITE background (Android-style transparency handling)...");
+  // ⭐ AGGRESSIVE DEBUG: Check original image properties
+  CGColorSpaceRef originalColorSpace = CGImageGetColorSpace(cgImage);
+  CGBitmapInfo originalBitmapInfo = CGImageGetBitmapInfo(cgImage);
+  size_t originalBitsPerComponent = CGImageGetBitsPerComponent(cgImage);
+  size_t originalBitsPerPixel = CGImageGetBitsPerPixel(cgImage);
   
-  // Create a new image context with WHITE background (like Android does)
-  UIGraphicsBeginImageContextWithOptions(CGSizeMake(width, height), YES, 1.0); // YES = opaque, forces white background
-  CGContextRef whiteBackgroundContext = UIGraphicsGetCurrentContext();
-  
-  if (!whiteBackgroundContext) {
-    NSLog(@"[ImageUtils]    ❌ Failed to create white background context");
-    return NULL;
-  }
-  
-  // Fill with WHITE background (this handles transparency like Android)
-  CGContextSetRGBFillColor(whiteBackgroundContext, 1.0, 1.0, 1.0, 1.0); // White
-  CGContextFillRect(whiteBackgroundContext, CGRectMake(0, 0, width, height));
-  
-  // Draw the original image on top of white background
-  CGContextDrawImage(whiteBackgroundContext, CGRectMake(0, 0, width, height), cgImage);
-  
-  // Get the image with white background applied
-  UIImage *imageWithWhiteBackground = UIGraphicsGetImageFromCurrentImageContext();
-  UIGraphicsEndImageContext();
-  
-  if (!imageWithWhiteBackground) {
-    NSLog(@"[ImageUtils]    ❌ Failed to create image with white background");
-    return NULL;
-  }
-  
-  NSLog(@"[ImageUtils]    ✅ Successfully created image with WHITE background");
-  
-  // Now use this white-background image for processing
-  CGImageRef processImageRef = imageWithWhiteBackground.CGImage;
+  NSLog(@"[ImageUtils]    ORIGINAL IMAGE ANALYSIS:");
+  NSLog(@"[ImageUtils]      BitsPerComponent: %zu", originalBitsPerComponent);
+  NSLog(@"[ImageUtils]      BitsPerPixel: %zu", originalBitsPerPixel);
+  NSLog(@"[ImageUtils]      BitmapInfo: %u", (unsigned int)originalBitmapInfo);
+  NSLog(@"[ImageUtils]      HasAlpha: %s", (originalBitmapInfo & kCGBitmapAlphaInfoMask) != kCGImageAlphaNone ? "YES" : "NO");
 
-  // ⭐ ANDROID-STYLE: Use desaturation like Android's ColorMatrix
-  NSLog(@"[ImageUtils]    creating ANDROID-STYLE desaturated image...");
+  // ⭐ SIMPLE & DIRECT: Create white-background image with explicit RGB drawing
+  NSLog(@"[ImageUtils]    SIMPLIFIED approach: creating RGB image with explicit WHITE background...");
   
-  // Create a new image context for color processing
-  UIGraphicsBeginImageContextWithOptions(CGSizeMake(width, height), YES, 1.0);
-  CGContextRef context = UIGraphicsGetCurrentContext();
-  
-  if (!context) {
-    NSLog(@"[ImageUtils]    ❌ Failed to create graphics context");
+  // Create RGB color space
+  CGColorSpaceRef rgbColorSpace = CGColorSpaceCreateDeviceRGB();
+  if (!rgbColorSpace) {
+    NSLog(@"[ImageUtils]    ❌ Failed to create RGB color space");
     return NULL;
   }
   
-  // Fill with white background first (redundant but safe)
-  CGContextSetRGBFillColor(context, 1.0, 1.0, 1.0, 1.0);
-  CGContextFillRect(context, CGRectMake(0, 0, width, height));
-  
-  // ⭐ ANDROID-EQUIVALENT: Apply saturation = 0 (like Android's ColorMatrix)
-  // This is equivalent to Android's cm.setSaturation(0)
-  CGFloat desaturateComponents[20] = {
-    0.299, 0.587, 0.114, 0,     0,  // Red channel   (standard luminance weights)
-    0.299, 0.587, 0.114, 0,     0,  // Green channel (same weights = grayscale)
-    0.299, 0.587, 0.114, 0,     0,  // Blue channel  (same weights = grayscale)
-    0,     0,     0,     1,     0   // Alpha channel (unchanged)
-  };
-  
-  CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-  CGImageRef desaturatedImageRef = NULL;
-  
-  // Apply the desaturation filter
-  CIContext *ciContext = [CIContext contextWithOptions:nil];
-  CIImage *ciImage = [CIImage imageWithCGImage:processImageRef];
-  
-  // Create color matrix filter (equivalent to Android's ColorMatrix)
-  CIFilter *colorMatrixFilter = [CIFilter filterWithName:@"CIColorMatrix"];
-  [colorMatrixFilter setValue:ciImage forKey:kCIInputImageKey];
-  
-  // Set the matrix values for desaturation (saturation = 0)
-  [colorMatrixFilter setValue:[CIVector vectorWithX:0.299 Y:0.587 Z:0.114 W:0] forKey:@"inputRVector"];
-  [colorMatrixFilter setValue:[CIVector vectorWithX:0.299 Y:0.587 Z:0.114 W:0] forKey:@"inputGVector"];  
-  [colorMatrixFilter setValue:[CIVector vectorWithX:0.299 Y:0.587 Z:0.114 W:0] forKey:@"inputBVector"];
-  [colorMatrixFilter setValue:[CIVector vectorWithX:0 Y:0 Z:0 W:1] forKey:@"inputAVector"];
-  
-  CIImage *outputImage = [colorMatrixFilter outputImage];
-  desaturatedImageRef = [ciContext createCGImage:outputImage fromRect:outputImage.extent];
-  
-  if (!desaturatedImageRef) {
-    NSLog(@"[ImageUtils]    ❌ Failed to create desaturated image, falling back to simple method");
-    // Fallback to simple drawing
-    CGContextDrawImage(context, CGRectMake(0, 0, width, height), processImageRef);
-  } else {
-    NSLog(@"[ImageUtils]    ✅ Successfully created ANDROID-STYLE desaturated image");
-    CGContextDrawImage(context, CGRectMake(0, 0, width, height), desaturatedImageRef);
-    CGImageRelease(desaturatedImageRef);
-  }
-  
-  CGColorSpaceRelease(colorSpace);
-  
-  // Get the processed image
-  UIImage *processedImage = UIGraphicsGetImageFromCurrentImageContext();
-  UIGraphicsEndImageContext();
-  
-  if (!processedImage) {
-    NSLog(@"[ImageUtils]    ❌ Failed to get processed image");
+  // Allocate RGB buffer (4 bytes per pixel: RGBA)
+  size_t rgbDataSize = width * height * 4;
+  uint8_t *rgbData = calloc(rgbDataSize, 1);
+  if (!rgbData) {
+    NSLog(@"[ImageUtils]    ❌ Failed to allocate RGB buffer");
+    CGColorSpaceRelease(rgbColorSpace);
     return NULL;
   }
   
-  // Now extract grayscale data from the processed image
-  CGImageRef processedCGImage = processedImage.CGImage;
-  size_t dataSize = width * height;
-  uint8_t *greyData = malloc(dataSize);
-  NSLog(@"[ImageUtils]    malloc greyData = %p (%zu bytes)", greyData, dataSize);
-  if (!greyData) {
-    NSLog(@"[ImageUtils]    ❌ malloc falló");
-    return NULL;
+  // Fill entire buffer with WHITE (255,255,255,255)
+  for (size_t i = 0; i < width * height; i++) {
+    rgbData[i * 4 + 0] = 255; // R
+    rgbData[i * 4 + 1] = 255; // G  
+    rgbData[i * 4 + 2] = 255; // B
+    rgbData[i * 4 + 3] = 255; // A
   }
-  memset(greyData, 0, dataSize);
-
-  NSLog(@"[ImageUtils]    creating final grayscale context...");
-  CGColorSpaceRef graySpace = CGColorSpaceCreateDeviceGray();
-  if (!graySpace) {
-    NSLog(@"[ImageUtils]    ❌ Failed to create gray color space");
-    free(greyData);
-    return NULL;
-  }
+  NSLog(@"[ImageUtils]    ✅ Pre-filled RGB buffer with WHITE");
   
-  CGContextRef ctx = CGBitmapContextCreate(
-    greyData,
+  // Create RGB context
+  CGContextRef rgbContext = CGBitmapContextCreate(
+    rgbData,
     width,
-    height,
-    8,                               // bits per component
-    width,                          // bytes per row (1 byte per pixel for grayscale)
-    graySpace,
-    kCGImageAlphaNone
+    height, 
+    8,
+    width * 4,
+    rgbColorSpace,
+    kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big
   );
-  CGColorSpaceRelease(graySpace);
-  NSLog(@"[ImageUtils]    CGContext = %p", ctx);
-  if (!ctx) {
-    NSLog(@"[ImageUtils]    ❌ CGContextCreation falló");
-    free(greyData);
+  
+  CGColorSpaceRelease(rgbColorSpace);
+  
+  if (!rgbContext) {
+    NSLog(@"[ImageUtils]    ❌ Failed to create RGB context");
+    free(rgbData);
     return NULL;
   }
-
-  NSLog(@"[ImageUtils]    drawing processed image into grayscale context...");
-  CGContextDrawImage(ctx, CGRectMake(0,0,width,height), processedCGImage);
-  CGContextRelease(ctx);
   
-  // Validate that we actually got grayscale data
-  int nonZeroCount = 0;
-  for (int i = 0; i < MIN(100, (int)dataSize); i++) {
-    if (greyData[i] != 0) nonZeroCount++;
+  // Clear with white background (redundant but explicit)
+  CGContextSetRGBFillColor(rgbContext, 1.0, 1.0, 1.0, 1.0);
+  CGContextFillRect(rgbContext, CGRectMake(0, 0, width, height));
+  
+  // Draw original image on top
+  CGContextDrawImage(rgbContext, CGRectMake(0, 0, width, height), cgImage);
+  
+  // Sample the RGB data to verify content
+  NSLog(@"[ImageUtils]    SAMPLING RGB data after drawing:");
+  NSMutableString *rgbSample = [NSMutableString string];
+  for (int i = 0; i < MIN(5, (int)(width * height)); i++) {
+    int idx = i * 4;
+    [rgbSample appendFormat:@"[%d,%d,%d,%d] ", 
+     rgbData[idx], rgbData[idx+1], rgbData[idx+2], rgbData[idx+3]];
   }
-  NSLog(@"[ImageUtils]    validation: %d non-zero pixels in first 100", nonZeroCount);
+  NSLog(@"[ImageUtils]    First 5 RGBA pixels: %@", rgbSample);
   
-  // Sample and log some pixel values to debug conversion
-  NSLog(@"[ImageUtils]    sampling pixel values...");
-  int sampleSize = MIN(20, (int)dataSize);
-  NSMutableString *pixelSample = [NSMutableString string];
+  // Check for actual content (non-white pixels)
+  int nonWhitePixels = 0;
+  for (size_t i = 0; i < width * height; i++) {
+    int idx = i * 4;
+    if (rgbData[idx] < 250 || rgbData[idx+1] < 250 || rgbData[idx+2] < 250) {
+      nonWhitePixels++;
+    }
+  }
+  NSLog(@"[ImageUtils]    Non-white pixels found: %d out of %zu", nonWhitePixels, width * height);
   
+  CGContextRelease(rgbContext);
+
+  // Now convert RGB to grayscale manually (simple luminance formula)
+  size_t grayDataSize = width * height;
+  uint8_t *greyData = malloc(grayDataSize);
+  if (!greyData) {
+    NSLog(@"[ImageUtils]    ❌ malloc failed for grayscale data");
+    free(rgbData);
+    return NULL;
+  }
+  
+  NSLog(@"[ImageUtils]    Converting RGB to grayscale manually...");
+  for (size_t i = 0; i < width * height; i++) {
+    int idx = i * 4;
+    uint8_t r = rgbData[idx];
+    uint8_t g = rgbData[idx + 1]; 
+    uint8_t b = rgbData[idx + 2];
+    
+    // Standard luminance formula (same as Android)
+    uint8_t gray = (uint8_t)(0.299 * r + 0.587 * g + 0.114 * b);
+    greyData[i] = gray;
+  }
+  
+  free(rgbData);
+  
+  // Sample grayscale data
+  NSLog(@"[ImageUtils]    SAMPLING final grayscale data:");
+  NSMutableString *graySample = [NSMutableString string];
   int whiteCount = 0, blackCount = 0, grayCount = 0;
-  for (int i = 0; i < sampleSize; i++) {
+  
+  for (int i = 0; i < MIN(20, (int)grayDataSize); i++) {
     uint8_t pixelValue = greyData[i];
-    [pixelSample appendFormat:@"%d ", pixelValue];
+    [graySample appendFormat:@"%d ", pixelValue];
     
     if (pixelValue < 85) blackCount++;
     else if (pixelValue > 170) whiteCount++;
     else grayCount++;
   }
   
-  NSLog(@"[ImageUtils]    first %d pixels: %@", sampleSize, pixelSample);
-  NSLog(@"[ImageUtils]    quick analysis - Black(<85): %d, Gray(85-170): %d, White(>170): %d", 
+  NSLog(@"[ImageUtils]    First 20 grayscale pixels: %@", graySample);
+  NSLog(@"[ImageUtils]    Quick analysis - Black(<85): %d, Gray(85-170): %d, White(>170): %d", 
         blackCount, grayCount, whiteCount);
-  
-  // Sample from middle and end too
-  if (dataSize > 1000) {
-    int midIndex = (int)dataSize / 2;
-    NSMutableString *midSample = [NSMutableString string];
-    for (int i = 0; i < 10 && (midIndex + i) < dataSize; i++) {
-      [midSample appendFormat:@"%d ", greyData[midIndex + i]];
-    }
-    NSLog(@"[ImageUtils]    middle 10 pixels: %@", midSample);
-    
-    int endIndex = (int)dataSize - 10;
-    NSMutableString *endSample = [NSMutableString string];
-    for (int i = 0; i < 10 && (endIndex + i) < dataSize; i++) {
-      [endSample appendFormat:@"%d ", greyData[endIndex + i]];
-    }
-    NSLog(@"[ImageUtils]    last 10 pixels: %@", endSample);
-  }
 
-  NSLog(@"[ImageUtils]    ✅ successfully converted to ANDROID-STYLE grayscale with WHITE background (%zu bytes)", dataSize);
+  NSLog(@"[ImageUtils]    ✅ SIMPLIFIED conversion complete with EXPLICIT white background (%zu bytes)", grayDataSize);
 
   return greyData;
 }
