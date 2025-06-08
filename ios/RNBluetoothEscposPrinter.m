@@ -675,8 +675,8 @@ RCT_EXPORT_METHOD(printQRCode:(NSString *)content
   }
 
   unsigned char *bw = [ImageUtils format_K_threshold:gray
-                                              width:size.width
-                                             height:size.height];
+                                              width:size
+                                             height:size];
   free(gray);
 
   // 8) Generate ESC/POS commands using ANDROID-STYLE full image  
