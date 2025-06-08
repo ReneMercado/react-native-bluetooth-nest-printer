@@ -524,26 +524,13 @@ RCT_EXPORT_METHOD(printPic:(NSString *) base64encodeStr withOptions:(NSDictionar
         }
         NSLog(@"[printPic] Created source image with size: %@", NSStringFromCGSize(srcImage.size));
 
-        // 4) Convert to JPEG
-        NSData *jpgData = UIImageJPEGRepresentation(srcImage, 1);
-        if(!jpgData) {
-            NSLog(@"[printPic] Error: Failed to convert image to JPEG");
-            reject(@"JPEG_CONVERSION_FAILED", @"Failed to convert image to JPEG format", nil);
-            return;
-        }
-        NSLog(@"[printPic] Converted to JPEG (length: %lu)", (unsigned long)jpgData.length);
+        // ⭐ ANDROID-STYLE: Skip JPEG conversion, use original image directly
+        // Android doesn't convert to JPEG, so we shouldn't either
+        UIImage *imageToProcess = srcImage;
 
-        // 5) Create JPEG image
-        UIImage *jpgImage = [[UIImage alloc] initWithData:jpgData];
-        if(!jpgImage) {
-            NSLog(@"[printPic] Error: Failed to create image from JPEG data");
-            reject(@"INVALID_JPEG_DATA", @"Failed to create image from JPEG data", nil);
-            return;
-        }
-
-        // 6) Calculate dimensions
-        NSInteger imgHeight = jpgImage.size.height;
-        NSInteger imagWidth = jpgImage.size.width;
+        // 6) Calculate dimensions using original image
+        NSInteger imgHeight = imageToProcess.size.height;
+        NSInteger imagWidth = imageToProcess.size.width;
         NSInteger width = nWidth;
         NSLog(@"[printPic] Original image dimensions - Width: %ld, Height: %ld", (long)imagWidth, (long)imgHeight);
 
@@ -551,8 +538,8 @@ RCT_EXPORT_METHOD(printPic:(NSString *) base64encodeStr withOptions:(NSDictionar
         CGSize size = CGSizeMake(width, imgHeight*width/imagWidth);
         NSLog(@"[printPic] Scaled dimensions - Width: %f, Height: %f", size.width, size.height);
 
-        // 8) Scale image
-        UIImage *scaled = [ImageUtils imageWithImage:jpgImage scaledToFillSize:size];
+        // 8) Scale image directly (like Android's createScaledBitmap)
+        UIImage *scaled = [ImageUtils imageWithImage:imageToProcess scaledToFillSize:size];
         if(!scaled) {
             NSLog(@"[printPic] Error: Failed to scale image");
             reject(@"SCALING_FAILED", @"Failed to scale image to target size", nil);
