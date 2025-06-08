@@ -377,11 +377,10 @@ int p6[] = { 0, 0x02 };
     
     int grayave = graytotal / (xsize * ysize);
     
-    // Use improved threshold: midpoint between average and minimum for better contrast
-    // This helps with logos that have dark content on light backgrounds
-    int threshold = (grayave + minGray) / 2;
+    // ⭐ ANDROID LOGIC: Use only average as threshold (like Android does)
+    int threshold = grayave;
     
-    NSLog(@"[ImageUtils]    Gray stats - Min:%d, Max:%d, Avg:%d, Threshold:%d", 
+    NSLog(@"[ImageUtils]    Gray stats - Min:%d, Max:%d, Avg:%d, Threshold:%d (ANDROID-STYLE)", 
           minGray, maxGray, grayave, threshold);
     
     // Second pass: apply threshold
