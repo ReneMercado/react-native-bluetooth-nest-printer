@@ -77,263 +77,52 @@ int p6[] = { 0, 0x02 };
     return NULL;
   }
 
-  // ⭐ AGGRESSIVE DEBUG: Check original image properties
-  CGColorSpaceRef originalColorSpace = CGImageGetColorSpace(cgImage);
-  CGBitmapInfo originalBitmapInfo = CGImageGetBitmapInfo(cgImage);
-  size_t originalBitsPerComponent = CGImageGetBitsPerComponent(cgImage);
-  size_t originalBitsPerPixel = CGImageGetBitsPerPixel(cgImage);
+  // ⭐ SIMPLIFIED APPROACH: Direct RGB extraction like working fork
+  NSLog(@"[ImageUtils]    Using SIMPLIFIED RGB approach (like working fork)...");
   
-  NSLog(@"[ImageUtils]    ORIGINAL IMAGE ANALYSIS:");
-  NSLog(@"[ImageUtils]      BitsPerComponent: %zu", originalBitsPerComponent);
-  NSLog(@"[ImageUtils]      BitsPerPixel: %zu", originalBitsPerPixel);
-  NSLog(@"[ImageUtils]      BitmapInfo: %u", (unsigned int)originalBitmapInfo);
-  NSLog(@"[ImageUtils]      HasAlpha: %s", (originalBitmapInfo & kCGBitmapAlphaInfoMask) != kCGImageAlphaNone ? "YES" : "NO");
-
-  // ⭐ SIMPLE & DIRECT: Create white-background image with explicit RGB drawing
-  NSLog(@"[ImageUtils]    SIMPLIFIED approach: creating RGB image with explicit WHITE background...");
+  // Create RGB context to extract pixel data
+  uint32_t *rgbImage = (uint32_t *) malloc(width * height * sizeof(uint32_t));
+  CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+  CGContextRef context = CGBitmapContextCreate(rgbImage, width, height, 8, width*4, colorSpace,
+                                               kCGBitmapByteOrder32Little | kCGImageAlphaNoneSkipLast);
+  CGContextSetInterpolationQuality(context, kCGInterpolationHigh);
+  CGContextSetShouldAntialias(context, NO);
+  CGContextDrawImage(context, CGRectMake(0, 0, width, height), cgImage);
+  CGContextRelease(context);
+  CGColorSpaceRelease(colorSpace);
   
-  // Create RGB color space
-  CGColorSpaceRef rgbColorSpace = CGColorSpaceCreateDeviceRGB();
-  if (!rgbColorSpace) {
-    NSLog(@"[ImageUtils]    ❌ Failed to create RGB color space");
-    return NULL;
-  }
-  
-  // Allocate RGB buffer (4 bytes per pixel: RGBA)
-  size_t rgbDataSize = width * height * 4;
-  uint8_t *rgbData = calloc(rgbDataSize, 1);
-  if (!rgbData) {
-    NSLog(@"[ImageUtils]    ❌ Failed to allocate RGB buffer");
-    CGColorSpaceRelease(rgbColorSpace);
-    return NULL;
-  }
-  
-  // Fill entire buffer with WHITE (255,255,255,255)
-  for (size_t i = 0; i < width * height; i++) {
-    rgbData[i * 4 + 0] = 255; // R
-    rgbData[i * 4 + 1] = 255; // G  
-    rgbData[i * 4 + 2] = 255; // B
-    rgbData[i * 4 + 3] = 255; // A
-  }
-  NSLog(@"[ImageUtils]    ✅ Pre-filled RGB buffer with WHITE");
-  
-  // Create RGB context
-  CGContextRef rgbContext = CGBitmapContextCreate(
-    rgbData,
-    width,
-    height, 
-    8,
-    width * 4,
-    rgbColorSpace,
-    kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big
-  );
-  
-  CGColorSpaceRelease(rgbColorSpace);
-  
-  if (!rgbContext) {
-    NSLog(@"[ImageUtils]    ❌ Failed to create RGB context");
-    free(rgbData);
-    return NULL;
-  }
-  
-  // Clear with white background (redundant but explicit)
-  CGContextSetRGBFillColor(rgbContext, 1.0, 1.0, 1.0, 1.0);
-  CGContextFillRect(rgbContext, CGRectMake(0, 0, width, height));
-  
-  // Draw original image on top
-  CGContextDrawImage(rgbContext, CGRectMake(0, 0, width, height), cgImage);
-  
-  // Sample the RGB data to verify content
-  NSLog(@"[ImageUtils]    SAMPLING RGB data after drawing:");
-  NSMutableString *rgbSample = [NSMutableString string];
-  for (int i = 0; i < MIN(5, (int)(width * height)); i++) {
-    int idx = i * 4;
-    [rgbSample appendFormat:@"[%d,%d,%d,%d] ", 
-     rgbData[idx], rgbData[idx+1], rgbData[idx+2], rgbData[idx+3]];
-  }
-  NSLog(@"[ImageUtils]    First 5 RGBA pixels: %@", rgbSample);
-  
-  // Check for actual content (non-white pixels)
-  int nonWhitePixels = 0;
-  for (size_t i = 0; i < width * height; i++) {
-    int idx = i * 4;
-    if (rgbData[idx] < 250 || rgbData[idx+1] < 250 || rgbData[idx+2] < 250) {
-      nonWhitePixels++;
-    }
-  }
-  NSLog(@"[ImageUtils]    Non-white pixels found: %d out of %zu", nonWhitePixels, width * height);
-  
-  CGContextRelease(rgbContext);
-
-  // ⭐ MUCH SIMPLER: Use Core Image to convert to grayscale directly
-  NSLog(@"[ImageUtils]    Using Core Image CIColorMonochrome for grayscale conversion...");
-  
-  // Create UIImage from RGB data for Core Image processing
-  CGColorSpaceRef rgbColorSpaceForImage = CGColorSpaceCreateDeviceRGB();
-  CGDataProviderRef dataProvider = CGDataProviderCreateWithData(NULL, rgbData, rgbDataSize, NULL);
-  CGImageRef rgbImageRef = CGImageCreate(
-    width, height, 8, 32, width * 4,
-    rgbColorSpaceForImage, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big,
-    dataProvider, NULL, false, kCGRenderingIntentDefault
-  );
-  
-  CGColorSpaceRelease(rgbColorSpaceForImage);
-  CGDataProviderRelease(dataProvider);
-  
-  if (!rgbImageRef) {
-    NSLog(@"[ImageUtils]    ❌ Failed to create CGImage from RGB data");
-    free(rgbData);
-    return NULL;
-  }
-  
-  // Apply monochrome filter using Core Image
-  CIContext *ciContext = [CIContext contextWithOptions:nil];
-  CIImage *inputImage = [CIImage imageWithCGImage:rgbImageRef];
-  
-  CIFilter *monochromeFilter = [CIFilter filterWithName:@"CIColorMonochrome"];
-  [monochromeFilter setValue:inputImage forKey:kCIInputImageKey];
-  [monochromeFilter setValue:[CIColor colorWithRed:0.7 green:0.7 blue:0.7] forKey:@"inputColor"]; // Neutral gray
-  [monochromeFilter setValue:@1.0 forKey:@"inputIntensity"]; // Full intensity
-  
-  CIImage *outputImage = [monochromeFilter outputImage];
-  CGImageRef monochromeImageRef = [ciContext createCGImage:outputImage fromRect:outputImage.extent];
-  
-  CGImageRelease(rgbImageRef);
-  
-  if (!monochromeImageRef) {
-    NSLog(@"[ImageUtils]    ❌ Core Image monochrome filter failed");
-    free(rgbData);
-    return NULL;
-  }
-  
-  NSLog(@"[ImageUtils]    ✅ Core Image monochrome conversion successful");
-
-  // Now extract grayscale data from the processed image
-  size_t grayDataSize = width * height;
-  uint8_t *greyData = malloc(grayDataSize);
+  // Convert to grayscale - simple RGB averaging
+  uint8_t *greyData = (uint8_t *) malloc(width * height);
   if (!greyData) {
     NSLog(@"[ImageUtils]    ❌ malloc failed for grayscale data");
-    CGImageRelease(monochromeImageRef);
-    free(rgbData);
+    free(rgbImage);
     return NULL;
   }
   
-  // Create grayscale context to extract data
-  CGColorSpaceRef graySpace = CGColorSpaceCreateDeviceGray();
-  CGContextRef grayContext = CGBitmapContextCreate(
-    greyData, width, height, 8, width,
-    graySpace, kCGImageAlphaNone
-  );
-  
-  CGColorSpaceRelease(graySpace);
-  
-  if (!grayContext) {
-    NSLog(@"[ImageUtils]    ❌ Failed to create grayscale context");
-    free(greyData);
-    CGImageRelease(monochromeImageRef);
-    free(rgbData);
-    return NULL;
+  for(int y = 0; y < height; y++) {
+    for(int x = 0; x < width; x++) {
+      uint32_t rgbPixel = rgbImage[y * width + x];
+      uint32_t red   = (rgbPixel >> 24) & 255;
+      uint32_t green = (rgbPixel >> 16) & 255; 
+      uint32_t blue  = (rgbPixel >> 8) & 255;
+      
+      // Simple average for grayscale
+      uint32_t gray = (red + green + blue) / 3;
+      greyData[y * width + x] = gray;
+    }
   }
   
-  // Draw monochrome image into grayscale context
-  CGContextDrawImage(grayContext, CGRectMake(0, 0, width, height), monochromeImageRef);
-  CGContextRelease(grayContext);
-  CGImageRelease(monochromeImageRef);
-  free(rgbData);
-
-  // Sample grayscale data - IMPROVED to find non-white pixels
-  NSLog(@"[ImageUtils]    SAMPLING final grayscale data:");
+  free(rgbImage);
+  
+  // Sample the results
+  NSLog(@"[ImageUtils]    SAMPLING simplified grayscale data:");
   NSMutableString *graySample = [NSMutableString string];
-  int whiteCount = 0, blackCount = 0, grayCount = 0;
-  
-  // ⭐ BETTER SAMPLING: Find and show actual non-white pixels  
-  NSMutableString *nonWhiteFound = [NSMutableString string];
-  int nonWhiteGrayCount = 0;
-  
-  for (int i = 0; i < MIN(20, (int)grayDataSize); i++) {
-    uint8_t pixelValue = greyData[i];
-    [graySample appendFormat:@"%d ", pixelValue];
-    
-    if (pixelValue < 85) blackCount++;
-    else if (pixelValue > 170) whiteCount++;
-    else grayCount++;
+  for (int i = 0; i < MIN(10, (int)(width * height)); i++) {
+    [graySample appendFormat:@"%d ", greyData[i]];
   }
+  NSLog(@"[ImageUtils]    First 10 grayscale pixels: %@", graySample);
   
-  // Search for non-white pixels in the entire image
-  for (size_t i = 0; i < grayDataSize && nonWhiteGrayCount < 10; i++) {
-    uint8_t pixelValue = greyData[i];
-    if (pixelValue < 250) {
-      [nonWhiteFound appendFormat:@"[%zu]=%d ", i, pixelValue];
-      nonWhiteGrayCount++;
-    }
-  }
-  
-  NSLog(@"[ImageUtils]    First 20 grayscale pixels: %@", graySample);
-  NSLog(@"[ImageUtils]    Quick analysis - Black(<85): %d, Gray(85-170): %d, White(>170): %d", 
-        blackCount, grayCount, whiteCount);
-  NSLog(@"[ImageUtils]    🔍 NON-WHITE grayscale pixels found: %@", 
-        nonWhiteGrayCount > 0 ? nonWhiteFound : @"NONE!");
-  NSLog(@"[ImageUtils]    🔍 Total non-white grayscale pixels: %d", nonWhiteGrayCount);
-
-  NSLog(@"[ImageUtils]    ✅ SIMPLIFIED conversion complete with EXPLICIT white background (%zu bytes)", grayDataSize);
-
-  // ⭐ ALWAYS INJECT DEBUG CONTENT - regardless of Core Image detection
-  if (grayDataSize > 1000) {
-    // ⭐ FIRST: Log actual image dimensions to understand the canvas
-    NSLog(@"[ImageUtils]    📐 ACTUAL IMAGE DIMENSIONS: width=%zu, height=%zu, total pixels=%zu", 
-          width, height, grayDataSize);
-    
-    // Create a MUCH LARGER pattern that fills most of the image - BUT ADAPTIVE TO ACTUAL SIZE
-    int maxWidth = (int)width;
-    int maxHeight = (int)height;
-    int logoWidth = MIN(maxWidth - 40, maxWidth * 0.8);   // 80% of actual width, leave 40px margin
-    int logoHeight = MIN(maxHeight - 40, maxHeight * 0.6); // 60% of actual height, leave 40px margin
-    int startX = (maxWidth - logoWidth) / 2;     // Center horizontally
-    int startY = (maxHeight - logoHeight) / 2;   // Center vertically
-    
-    NSLog(@"[ImageUtils]    🎯 ALWAYS-ON logo pattern: %dx%d at position (%d,%d) within %dx%d canvas", 
-          logoWidth, logoHeight, startX, startY, maxWidth, maxHeight);
-    
-    for (int y = startY; y < startY + logoHeight && y < height; y++) {
-      for (int x = startX; x < startX + logoWidth && x < width; x++) {
-        int index = y * width + x;
-        if (index < grayDataSize) {
-          // Create a solid dark rectangle - much more aggressive
-          if (x == startX || x == startX + logoWidth - 1 || 
-              y == startY || y == startY + logoHeight - 1) {
-            greyData[index] = 50; // Very dark border
-          } else if ((x - startX) % 10 < 5 && (y - startY) % 10 < 5) {
-            greyData[index] = 80; // Dark checkerboard pattern
-          } else {
-            greyData[index] = 150; // Medium interior
-          }
-        }
-      }
-    }
-    
-    // Also create additional visible lines across the image - BETTER SPACED
-    int lineSpacing = maxHeight / 10; // 10 lines across the height
-    if (lineSpacing < 5) lineSpacing = 5; // Minimum spacing
-    
-    for (int y = 0; y < height; y += lineSpacing) {
-      for (int x = 0; x < width; x++) {
-        int index = y * width + x;
-        if (index < grayDataSize) {
-          greyData[index] = 100; // Horizontal lines
-        }
-      }
-    }
-    
-    // Also set the original debug pixels
-    greyData[0] = 50;   // Very dark
-    greyData[1] = 100;  // Dark  
-    greyData[2] = 150;  // Medium
-    greyData[3] = 200;  // Light
-    greyData[4] = 250;  // Very light
-    
-    NSLog(@"[ImageUtils]    🔧 INJECTED ALWAYS-ON LOGO: %dx%d rectangle + checkerboard + %d horizontal lines", 
-          logoWidth, logoHeight, (int)(height / lineSpacing));
-  }
+  NSLog(@"[ImageUtils]    ✅ SIMPLIFIED conversion complete (%zu bytes)", width * height);
 
   return greyData;
 }
@@ -546,74 +335,32 @@ int p6[] = { 0, 0x02 };
     
     int graytotal = 0;
     int k = 0;
-    int minGray = 255, maxGray = 0;
     
     int i;
     int j;
     int gray;
     
-    NSLog(@"[ImageUtils]    calculating statistics...");
-    // First pass: calculate statistics
+    NSLog(@"[ImageUtils]    calculating average threshold (simple approach)...");
+    // First pass: calculate average
     for(i = 0; i < ysize; ++i) {
         for(j = 0; j < xsize; ++j) {
             gray = orgpixels[k] & 255;
             graytotal += gray;
-            if(gray < minGray) minGray = gray;
-            if(gray > maxGray) maxGray = gray;
             ++k;
         }
     }
     
-    int grayave = graytotal / (xsize * ysize);
-    
-    // ⭐ EMERGENCY DETECTION: Check for debug pixels we set
-    BOOL hasDebugPixels = NO;
-    if (xsize * ysize > 5) {
-        if (orgpixels[0] == 50 && orgpixels[1] == 100 && orgpixels[2] == 150) {
-            hasDebugPixels = YES;
-            NSLog(@"[ImageUtils]    🚨 DEBUG PIXELS DETECTED! Core Image content was found.");
-        }
-    }
-    
-    // ⭐ SPECIAL HANDLING: Detect completely white or near-white images
-    int threshold;
-    int grayRange = maxGray - minGray;
-    
-    if (hasDebugPixels) {
-        // ⭐ EMERGENCY MODE: We know there was content, use very aggressive threshold
-        threshold = 250; // ⭐ ULTRA AGGRESSIVE - catch almost everything
-        NSLog(@"[ImageUtils]    🚨 EMERGENCY MODE: Using ULTRA aggressive threshold (250) due to detected Core Image content");
-    } else if (grayRange <= 5 && minGray >= 250) {
-        // Completely white or near-white image (like logos on white background)
-        // Use a threshold much lower than the average to detect any content
-        threshold = minGray - 10; // Go below minimum to detect content
-        NSLog(@"[ImageUtils]    WHITE IMAGE detected (min=%d, range=%d), using content-detection threshold", minGray, grayRange);
-    } else if (grayRange <= 10 && grayave >= 240) {
-        // Very light image - BE MUCH MORE AGGRESSIVE 
-        threshold = 230; // ⭐ VERY AGGRESSIVE for logos
-        NSLog(@"[ImageUtils]    VERY LIGHT IMAGE detected, using AGGRESSIVE threshold for logo detection");
-    } else if (grayave >= 250) {
-        // ⭐ NEW: Ultra-light images (like our case with 249, 244, 238 pixels)
-        threshold = 240; // Detect anything below 240 as content
-        NSLog(@"[ImageUtils]    ULTRA-LIGHT IMAGE detected (avg=%d), using ULTRA-AGGRESSIVE threshold", grayave);
-    } else {
-        // Normal image - use Android-style average threshold
-        threshold = grayave;
-        NSLog(@"[ImageUtils]    NORMAL IMAGE, using Android-style average threshold");
-    }
-    
-    NSLog(@"[ImageUtils]    Gray stats - Min:%d, Max:%d, Avg:%d, Range:%d, Threshold:%d (SMART)",
-          minGray, maxGray, grayave, grayRange, threshold);
+    int grayave = graytotal / ysize / xsize;
+    NSLog(@"[ImageUtils]    Simple threshold = %d (average only)", grayave);
     
     // Second pass: apply threshold
     k = 0;
     int blackPixels = 0, whitePixels = 0;
-    NSLog(@"[ImageUtils]    applying threshold...");
     
     for(i = 0; i < ysize; ++i) {
         for(j = 0; j < xsize; ++j) {
             gray = orgpixels[k] & 255;
-            if(gray > threshold) {
+            if(gray > grayave) {
                 despixels[k] = 0;  // White pixel
                 whitePixels++;
             } else {
@@ -627,7 +374,7 @@ int p6[] = { 0, 0x02 };
     float blackPercent = (float)blackPixels / (float)(xsize * ysize) * 100.0f;
     float whitePercent = (float)whitePixels / (float)(xsize * ysize) * 100.0f;
     
-    NSLog(@"[ImageUtils]    ✅ Final result - Black pixels: %d (%.1f%%), White pixels: %d (%.1f%%)",
+    NSLog(@"[ImageUtils]    ✅ SIMPLE threshold result - Black pixels: %d (%.1f%%), White pixels: %d (%.1f%%)",
           blackPixels, blackPercent, whitePixels, whitePercent);
     
     return despixels;

@@ -524,124 +524,59 @@ RCT_EXPORT_METHOD(printPic:(NSString *) base64encodeStr withOptions:(NSDictionar
         }
         NSLog(@"[printPic] Created source image with size: %@", NSStringFromCGSize(srcImage.size));
 
-        // ⭐ DEBUG: Analyze the original image BEFORE any processing
-        NSLog(@"[printPic] === DEBUGGING ORIGINAL IMAGE ===");
-        CGImageRef originalCGImage = srcImage.CGImage;
-        if (originalCGImage) {
-            size_t origWidth = CGImageGetWidth(originalCGImage);
-            size_t origHeight = CGImageGetHeight(originalCGImage);
-            NSLog(@"[printPic] Original CGImage dimensions: %zux%zu", origWidth, origHeight);
-            
-            // Sample some pixels from the original image BEFORE any conversion
-            CGColorSpaceRef origColorSpace = CGImageGetColorSpace(originalCGImage);
-            CGBitmapInfo origBitmapInfo = CGImageGetBitmapInfo(originalCGImage);
-            size_t origBitsPerComponent = CGImageGetBitsPerComponent(originalCGImage);
-            size_t origBitsPerPixel = CGImageGetBitsPerPixel(originalCGImage);
-            
-            NSLog(@"[printPic] Original image - BitsPerComponent:%zu, BitsPerPixel:%zu, BitmapInfo:%u", 
-                  origBitsPerComponent, origBitsPerPixel, (unsigned int)origBitmapInfo);
-            
-            // Try to read some raw pixel data from original
-            CFDataRef origPixelData = CGDataProviderCopyData(CGImageGetDataProvider(originalCGImage));
-            if (origPixelData) {
-                const UInt8 *origPixelBytes = CFDataGetBytePtr(origPixelData);
-                CFIndex origDataLength = CFDataGetLength(origPixelData);
-                NSLog(@"[printPic] Original raw pixel data length: %ld bytes", (long)origDataLength);
-                
-                // Sample first 20 bytes of raw data
-                NSMutableString *rawSample = [NSMutableString string];
-                int sampleCount = MIN(20, (int)origDataLength);
-                for (int i = 0; i < sampleCount; i++) {
-                    [rawSample appendFormat:@"%d ", origPixelBytes[i]];
-                }
-                NSLog(@"[printPic] First %d raw bytes: %@", sampleCount, rawSample);
-                
-                CFRelease(origPixelData);
-            } else {
-                NSLog(@"[printPic] ❌ Could not get raw pixel data from original image");
-            }
-        } else {
-            NSLog(@"[printPic] ❌ No CGImage in source image");
-        }
-        NSLog(@"[printPic] === END ORIGINAL IMAGE DEBUG ===");
-
-        // ⭐ ANDROID-STYLE: Skip JPEG conversion, use original image directly
-        // Android doesn't convert to JPEG, so we shouldn't either
-        UIImage *imageToProcess = srcImage;
-
-        // 6) Calculate dimensions using original image
-        NSInteger imgHeight = imageToProcess.size.height;
-        NSInteger imagWidth = imageToProcess.size.width;
-        NSInteger width = nWidth;
-        NSLog(@"[printPic] Original image dimensions - Width: %ld, Height: %ld", (long)imagWidth, (long)imgHeight);
-
-        // 7) Calculate scaled size
+        // ⭐ NEW: Convert to JPEG first (like the working fork)
+        NSData *jpgData = UIImageJPEGRepresentation(srcImage, 1);
+        UIImage *jpgImage = [[UIImage alloc] initWithData:jpgData];
+        
+        //mBitmap.getHeight() * width / mBitmap.getWidth();
+        NSInteger imgHeight = jpgImage.size.height;
+        NSInteger imagWidth = jpgImage.size.width;
+        NSInteger width = nWidth;//((int)(((nWidth*0.86)+7)/8))*8-7;
         CGSize size = CGSizeMake(width, imgHeight*width/imagWidth);
-        NSLog(@"[printPic] Scaled dimensions - Width: %f, Height: %f", size.width, size.height);
-
-        // 8) Scale image directly (like Android's createScaledBitmap)
-        UIImage *scaled = [ImageUtils imageWithImage:imageToProcess scaledToFillSize:size];
-        if(!scaled) {
-            NSLog(@"[printPic] Error: Failed to scale image");
-            reject(@"SCALING_FAILED", @"Failed to scale image to target size", nil);
-            return;
-        }
-        NSLog(@"[printPic] Successfully scaled image");
-
-        // 9) Apply padding if needed
-        if(paddingLeft > 0) {
-            NSLog(@"[printPic] Applying left padding: %ld", (long)paddingLeft);
-            scaled = [ImageUtils imagePadLeft:paddingLeft withSource:scaled];
-            if(!scaled) {
-                NSLog(@"[printPic] Error: Failed to apply left padding");
-                reject(@"PADDING_FAILED", @"Failed to apply left padding to image", nil);
-                return;
-            }
+        UIImage *scaled = [ImageUtils imageWithImage:jpgImage scaledToFillSize:size];
+        if(leftPadding > 0){
+            scaled = [ImageUtils imagePadLeft:leftPadding withSource:scaled];
             size = [scaled size];
-            NSLog(@"[printPic] New dimensions after padding - Width: %f, Height: %f", size.width, size.height);
         }
-
-        // 10) Convert to grayscale
-        NSLog(@"[printPic] Converting to grayscale");
-        unsigned char *graImage = [ImageUtils imageToGreyImage:scaled];
-        if(!graImage) {
-            NSLog(@"[printPic] Error: Failed to convert image to grayscale");
-            reject(@"GRAYSCALE_CONVERSION_FAILED", @"Failed to convert image to grayscale", nil);
+        
+        NSLog(@"[printPic] Final scaled image size: %@", NSStringFromCGSize(size));
+        
+        unsigned char * graImage = [ImageUtils imageToGreyImage:scaled];
+        if (!graImage) {
+            NSLog(@"[printPic] ❌ Failed to convert to grayscale");
+            reject(@"PRINT_IMAGE_FAILED", @"Failed to convert image to grayscale", nil);
             return;
         }
-
-        // 11) Apply threshold formatting
-        NSLog(@"[printPic] Applying threshold formatting");
-        unsigned char *formatedData = [ImageUtils format_K_threshold:graImage width:size.width height:size.height];
-        if(!formatedData) {
-            NSLog(@"[printPic] Error: Failed to apply threshold formatting");
+        
+        unsigned char * formatedData = [ImageUtils format_K_threshold:graImage width:size.width height:size.height];
+        if (!formatedData) {
+            NSLog(@"[printPic] ❌ Failed to apply threshold");
             free(graImage);
-            reject(@"THRESHOLD_FORMATTING_FAILED", @"Failed to apply threshold formatting to image", nil);
+            reject(@"PRINT_IMAGE_FAILED", @"Failed to apply threshold", nil);
             return;
         }
-        free(graImage);
-
-        // 12) Generate print commands using line-by-line (faster than full image)
-        NSLog(@"[printPic] Generating print commands (line-by-line - faster)");
-        NSData *dataToPrint = [ImageUtils eachLinePixToCmd:formatedData nWidth:size.width nHeight:size.height nMode:0 leftPadding:paddingLeft];
-        if(!dataToPrint) {
-            NSLog(@"[printPic] Error: Failed to generate print commands");
+        
+        NSData *dataToPrint = [ImageUtils eachLinePixToCmd:formatedData nWidth:size.width nHeight:size.height nMode:0];
+        if (!dataToPrint) {
+            NSLog(@"[printPic] ❌ Failed to generate print commands");
+            free(graImage);
             free(formatedData);
-            reject(@"PRINT_COMMAND_GENERATION_FAILED", @"Failed to generate print commands from image data", nil);
+            reject(@"PRINT_IMAGE_FAILED", @"Failed to generate print commands", nil);
             return;
         }
+        
+        // Clean up
+        free(graImage);
         free(formatedData);
-        NSLog(@"[printPic] Generated print commands (length: %lu) - LINE BY LINE", (unsigned long)dataToPrint.length);
-
-        // 13) Setup delegate and print
+        
+        NSLog(@"[printPic] ✅ Image processing complete, sending to printer...");
+        
         PrintImageBleWriteDelegate *delegate = [[PrintImageBleWriteDelegate alloc] init];
         delegate.pendingResolve = resolve;
         delegate.pendingReject = reject;
-        delegate.width = width;
-        delegate.toPrint = dataToPrint;
+        delegate.width = (int)size.width;
+        delegate.toPrint  = dataToPrint;
         delegate.now = 0;
-
-        NSLog(@"[printPic] Starting print process");
         [delegate print];
     }
     @catch(NSException *e){
