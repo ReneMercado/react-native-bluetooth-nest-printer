@@ -277,6 +277,22 @@ int p6[] = { 0, 0x02 };
 
   NSLog(@"[ImageUtils]    ✅ SIMPLIFIED conversion complete with EXPLICIT white background (%zu bytes)", grayDataSize);
 
+  // ⭐ CRITICAL DEBUG: Check if pixels are being lost somewhere
+  if (nonWhiteGrayCount > 0) {
+    NSLog(@"[ImageUtils]    🚨 WARNING: %d non-white pixels detected but will likely be lost in threshold", nonWhiteGrayCount);
+    NSLog(@"[ImageUtils]    🔧 EMERGENCY: Setting ALL pixels to debug values for testing...");
+    
+    // Emergency debug: Set some pixels to obvious values to test the pipeline
+    if (grayDataSize > 100) {
+      greyData[0] = 50;   // Very dark
+      greyData[1] = 100;  // Dark  
+      greyData[2] = 150;  // Medium
+      greyData[3] = 200;  // Light
+      greyData[4] = 250;  // Very light
+      NSLog(@"[ImageUtils]    🔧 Set debug pixels: [0]=50, [1]=100, [2]=150, [3]=200, [4]=250");
+    }
+  }
+
   return greyData;
 }
 
@@ -508,11 +524,24 @@ int p6[] = { 0, 0x02 };
     
     int grayave = graytotal / (xsize * ysize);
     
+    // ⭐ EMERGENCY DETECTION: Check for debug pixels we set
+    BOOL hasDebugPixels = NO;
+    if (xsize * ysize > 5) {
+        if (orgpixels[0] == 50 && orgpixels[1] == 100 && orgpixels[2] == 150) {
+            hasDebugPixels = YES;
+            NSLog(@"[ImageUtils]    🚨 DEBUG PIXELS DETECTED! Core Image content was found.");
+        }
+    }
+    
     // ⭐ SPECIAL HANDLING: Detect completely white or near-white images
     int threshold;
     int grayRange = maxGray - minGray;
     
-    if (grayRange <= 5 && minGray >= 250) {
+    if (hasDebugPixels) {
+        // ⭐ EMERGENCY MODE: We know there was content, use very aggressive threshold
+        threshold = 200; // Super aggressive
+        NSLog(@"[ImageUtils]    🚨 EMERGENCY MODE: Using super aggressive threshold due to detected Core Image content");
+    } else if (grayRange <= 5 && minGray >= 250) {
         // Completely white or near-white image (like logos on white background)
         // Use a threshold much lower than the average to detect any content
         threshold = minGray - 10; // Go below minimum to detect content
