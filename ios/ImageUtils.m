@@ -539,8 +539,8 @@ int p6[] = { 0, 0x02 };
     
     if (hasDebugPixels) {
         // ⭐ EMERGENCY MODE: We know there was content, use very aggressive threshold
-        threshold = 200; // Super aggressive
-        NSLog(@"[ImageUtils]    🚨 EMERGENCY MODE: Using super aggressive threshold due to detected Core Image content");
+        threshold = 250; // ⭐ ULTRA AGGRESSIVE - catch almost everything
+        NSLog(@"[ImageUtils]    🚨 EMERGENCY MODE: Using ULTRA aggressive threshold (250) due to detected Core Image content");
     } else if (grayRange <= 5 && minGray >= 250) {
         // Completely white or near-white image (like logos on white background)
         // Use a threshold much lower than the average to detect any content
