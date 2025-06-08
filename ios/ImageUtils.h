@@ -14,6 +14,7 @@
 + (NSData*)bitmapToArray:(UIImage*) bmp;
 + (NSData *)eachLinePixToCmd:(unsigned char *)src nWidth:(NSInteger) nWidth nHeight:(NSInteger) nHeight nMode:(NSInteger) nMode;
 + (NSData *)eachLinePixToCmd:(unsigned char *)src nWidth:(NSInteger) nWidth nHeight:(NSInteger) nHeight nMode:(NSInteger) nMode leftPadding:(NSInteger) leftPadding;
++ (NSData *)fullImageToCmd:(unsigned char *)src nWidth:(NSInteger) nWidth nHeight:(NSInteger) nHeight nMode:(NSInteger) nMode leftPadding:(NSInteger) leftPadding;
 +(unsigned char *)format_K_threshold:(unsigned char *) orgpixels
                                width:(NSInteger) xsize height:(NSInteger) ysize;
 +(NSData *)pixToTscCmd:(uint8_t *)src width:(NSInteger) width;

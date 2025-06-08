@@ -443,4 +443,80 @@ int p6[] = { 0, 0x02 };
     return 384; // Standard 58mm printer width
 }
 
++ (NSData *)fullImageToCmd:(unsigned char *)src nWidth:(NSInteger) nWidth nHeight:(NSInteger) nHeight nMode:(NSInteger) nMode leftPadding:(NSInteger) leftPadding
+{
+    NSLog(@"[ImageUtils] → fullImageToCmd (ANDROID-STYLE): width=%ld, height=%ld, mode=%ld, padding=%ld", 
+          (long)nWidth, (long)nHeight, (long)nMode, (long)leftPadding);
+    
+    if (!src) {
+        NSLog(@"[ImageUtils]    ❌ src data is NULL");
+        return nil;
+    }
+    
+    if (nWidth <= 0 || nHeight <= 0) {
+        NSLog(@"[ImageUtils]    ❌ invalid dimensions");
+        return nil;
+    }
+    
+    NSInteger nBytesPerLine = (int)nWidth/8;
+    NSInteger bytesPerLineWithPadding = nBytesPerLine;
+    
+    // Calculate padding bytes (each byte is 8 pixels)
+    NSInteger paddingBytes = leftPadding / 8;
+    if (leftPadding > 0) {
+        bytesPerLineWithPadding += paddingBytes;
+    }
+    
+    NSLog(@"[ImageUtils]    nBytesPerLine: %ld, paddingBytes: %ld, bytesPerLineWithPadding: %ld", 
+          (long)nBytesPerLine, (long)paddingBytes, (long)bytesPerLineWithPadding);
+    
+    // ⭐ ANDROID-STYLE: Single command for entire image, not line by line
+    NSInteger totalImageBytes = nHeight * bytesPerLineWithPadding;
+    NSInteger totalSize = 8 + totalImageBytes; // Header (8 bytes) + image data
+    NSLog(@"[ImageUtils]    ANDROID-STYLE: single command, total size: %ld bytes", (long)totalSize);
+    
+    unsigned char * data = malloc(totalSize);
+    if (!data) {
+        NSLog(@"[ImageUtils]    ❌ malloc failed for command buffer");
+        return nil;
+    }
+    
+    // ⭐ Single GS v command for entire image (like Android)
+    data[0] = 29;  // GS
+    data[1] = 118; // v  
+    data[2] = 48;  // 0
+    data[3] = (unsigned char)(nMode & 1);
+    data[4] = (unsigned char)(bytesPerLineWithPadding % 256); // xL
+    data[5] = (unsigned char)(bytesPerLineWithPadding / 256); // xH
+    data[6] = (unsigned char)(nHeight % 256); // yL - ⭐ ENTIRE HEIGHT, not 1
+    data[7] = (unsigned char)(nHeight / 256); // yH
+    
+    NSLog(@"[ImageUtils]    Header: GS=%d v=%d 0=%d mode=%d xL=%d xH=%d yL=%d yH=%d", 
+          data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]);
+    
+    // Process all image data at once
+    NSInteger k = 0;
+    NSInteger dataIndex = 8; // Start after header
+    
+    for(int i = 0; i < nHeight; i++){
+        // Add padding bytes (zeros = white space) for each line
+        for (int p = 0; p < paddingBytes; p++) {
+            data[dataIndex++] = 0;
+        }
+        
+        // Add actual image data after padding for each line
+        for (int j = 0; j < nBytesPerLine; ++j) {
+            data[dataIndex++] = (int)(p0[src[k]] + p1[src[k + 1]] + p2[src[k + 2]] + p3[src[k + 3]] + p4[src[k + 4]] + p5[src[k + 5]] + p6[src[k + 6]] + src[k + 7]);
+            k = k + 8;
+        }
+    }
+    
+    NSLog(@"[ImageUtils]    ✅ ANDROID-STYLE command generation successful, single command: %ld bytes", (long)totalSize);
+    
+    NSData *result = [NSData dataWithBytes:data length:totalSize];
+    free(data);
+    
+    return result;
+}
+
 @end

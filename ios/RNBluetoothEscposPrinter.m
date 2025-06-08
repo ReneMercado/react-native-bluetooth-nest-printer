@@ -580,9 +580,9 @@ RCT_EXPORT_METHOD(printPic:(NSString *) base64encodeStr withOptions:(NSDictionar
         }
         free(graImage);
 
-        // 12) Generate print commands
-        NSLog(@"[printPic] Generating print commands");
-        NSData *dataToPrint = [ImageUtils eachLinePixToCmd:formatedData nWidth:size.width nHeight:size.height nMode:0];
+        // 12) Generate print commands using ANDROID-STYLE full image
+        NSLog(@"[printPic] Generating print commands (ANDROID-STYLE full image)");
+        NSData *dataToPrint = [ImageUtils fullImageToCmd:formatedData nWidth:size.width nHeight:size.height nMode:0 leftPadding:paddingLeft];
         if(!dataToPrint) {
             NSLog(@"[printPic] Error: Failed to generate print commands");
             free(formatedData);
@@ -590,7 +590,7 @@ RCT_EXPORT_METHOD(printPic:(NSString *) base64encodeStr withOptions:(NSDictionar
             return;
         }
         free(formatedData);
-        NSLog(@"[printPic] Generated print commands (length: %lu)", (unsigned long)dataToPrint.length);
+        NSLog(@"[printPic] Generated print commands (length: %lu) - SINGLE COMMAND", (unsigned long)dataToPrint.length);
 
         // 13) Setup delegate and print
         PrintImageBleWriteDelegate *delegate = [[PrintImageBleWriteDelegate alloc] init];
@@ -675,16 +675,16 @@ RCT_EXPORT_METHOD(printQRCode:(NSString *)content
   }
 
   unsigned char *bw = [ImageUtils format_K_threshold:gray
-                                              width:size
-                                             height:size];
+                                              width:size.width
+                                             height:size.height];
   free(gray);
 
-  // 8) Generar comandos ESC/POS
-  NSData *cmds = [ImageUtils eachLinePixToCmd:bw
-                                      nWidth:size
-                                     nHeight:size
-                                       nMode:0
-                                  leftPadding:appliedLeftPad];
+  // 8) Generate ESC/POS commands using ANDROID-STYLE full image  
+  NSData *cmds = [ImageUtils fullImageToCmd:bw
+                                    nWidth:size
+                                   nHeight:size
+                                     nMode:0
+                                leftPadding:appliedLeftPad];
 
   // 9) Enviar al dispositivo vía BLE
   PrintImageBleWriteDelegate *delegate = [[PrintImageBleWriteDelegate alloc] init];
