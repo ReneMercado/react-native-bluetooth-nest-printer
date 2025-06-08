@@ -524,6 +524,47 @@ RCT_EXPORT_METHOD(printPic:(NSString *) base64encodeStr withOptions:(NSDictionar
         }
         NSLog(@"[printPic] Created source image with size: %@", NSStringFromCGSize(srcImage.size));
 
+        // ⭐ DEBUG: Analyze the original image BEFORE any processing
+        NSLog(@"[printPic] === DEBUGGING ORIGINAL IMAGE ===");
+        CGImageRef originalCGImage = srcImage.CGImage;
+        if (originalCGImage) {
+            size_t origWidth = CGImageGetWidth(originalCGImage);
+            size_t origHeight = CGImageGetHeight(originalCGImage);
+            NSLog(@"[printPic] Original CGImage dimensions: %zux%zu", origWidth, origHeight);
+            
+            // Sample some pixels from the original image BEFORE any conversion
+            CGColorSpaceRef origColorSpace = CGImageGetColorSpace(originalCGImage);
+            CGBitmapInfo origBitmapInfo = CGImageGetBitmapInfo(originalCGImage);
+            size_t origBitsPerComponent = CGImageGetBitsPerComponent(originalCGImage);
+            size_t origBitsPerPixel = CGImageGetBitsPerPixel(originalCGImage);
+            
+            NSLog(@"[printPic] Original image - BitsPerComponent:%zu, BitsPerPixel:%zu, BitmapInfo:%u", 
+                  origBitsPerComponent, origBitsPerPixel, (unsigned int)origBitmapInfo);
+            
+            // Try to read some raw pixel data from original
+            CFDataRef origPixelData = CGDataProviderCopyData(CGImageGetDataProvider(originalCGImage));
+            if (origPixelData) {
+                const UInt8 *origPixelBytes = CFDataGetBytePtr(origPixelData);
+                CFIndex origDataLength = CFDataGetLength(origPixelData);
+                NSLog(@"[printPic] Original raw pixel data length: %ld bytes", (long)origDataLength);
+                
+                // Sample first 20 bytes of raw data
+                NSMutableString *rawSample = [NSMutableString string];
+                int sampleCount = MIN(20, (int)origDataLength);
+                for (int i = 0; i < sampleCount; i++) {
+                    [rawSample appendFormat:@"%d ", origPixelBytes[i]];
+                }
+                NSLog(@"[printPic] First %d raw bytes: %@", sampleCount, rawSample);
+                
+                CFRelease(origPixelData);
+            } else {
+                NSLog(@"[printPic] ❌ Could not get raw pixel data from original image");
+            }
+        } else {
+            NSLog(@"[printPic] ❌ No CGImage in source image");
+        }
+        NSLog(@"[printPic] === END ORIGINAL IMAGE DEBUG ===");
+
         // ⭐ ANDROID-STYLE: Skip JPEG conversion, use original image directly
         // Android doesn't convert to JPEG, so we shouldn't either
         UIImage *imageToProcess = srcImage;
