@@ -518,9 +518,13 @@ int p6[] = { 0, 0x02 };
         threshold = minGray - 10; // Go below minimum to detect content
         NSLog(@"[ImageUtils]    WHITE IMAGE detected (min=%d, range=%d), using content-detection threshold", minGray, grayRange);
     } else if (grayRange <= 10 && grayave >= 240) {
-        // Very light image
-        threshold = grayave - 15;
-        NSLog(@"[ImageUtils]    VERY LIGHT IMAGE detected, using reduced threshold");
+        // Very light image - BE MUCH MORE AGGRESSIVE 
+        threshold = 230; // ⭐ VERY AGGRESSIVE for logos
+        NSLog(@"[ImageUtils]    VERY LIGHT IMAGE detected, using AGGRESSIVE threshold for logo detection");
+    } else if (grayave >= 250) {
+        // ⭐ NEW: Ultra-light images (like our case with 249, 244, 238 pixels)
+        threshold = 240; // Detect anything below 240 as content
+        NSLog(@"[ImageUtils]    ULTRA-LIGHT IMAGE detected (avg=%d), using ULTRA-AGGRESSIVE threshold", grayave);
     } else {
         // Normal image - use Android-style average threshold
         threshold = grayave;
