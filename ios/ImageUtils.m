@@ -77,6 +77,39 @@ int p6[] = { 0, 0x02 };
     return NULL;
   }
 
+  // ⭐ ANDROID-STYLE: Handle transparency by rendering on WHITE background first
+  NSLog(@"[ImageUtils]    creating image with WHITE background (Android-style transparency handling)...");
+  
+  // Create a new image context with WHITE background (like Android does)
+  UIGraphicsBeginImageContextWithOptions(CGSizeMake(width, height), YES, 1.0); // YES = opaque, forces white background
+  CGContextRef whiteBackgroundContext = UIGraphicsGetCurrentContext();
+  
+  if (!whiteBackgroundContext) {
+    NSLog(@"[ImageUtils]    ❌ Failed to create white background context");
+    return NULL;
+  }
+  
+  // Fill with WHITE background (this handles transparency like Android)
+  CGContextSetRGBFillColor(whiteBackgroundContext, 1.0, 1.0, 1.0, 1.0); // White
+  CGContextFillRect(whiteBackgroundContext, CGRectMake(0, 0, width, height));
+  
+  // Draw the original image on top of white background
+  CGContextDrawImage(whiteBackgroundContext, CGRectMake(0, 0, width, height), cgImage);
+  
+  // Get the image with white background applied
+  UIImage *imageWithWhiteBackground = UIGraphicsGetImageFromCurrentImageContext();
+  UIGraphicsEndImageContext();
+  
+  if (!imageWithWhiteBackground) {
+    NSLog(@"[ImageUtils]    ❌ Failed to create image with white background");
+    return NULL;
+  }
+  
+  NSLog(@"[ImageUtils]    ✅ Successfully created image with WHITE background");
+  
+  // Now use this white-background image for processing
+  CGImageRef processImageRef = imageWithWhiteBackground.CGImage;
+
   // ⭐ ANDROID-STYLE: Use desaturation like Android's ColorMatrix
   NSLog(@"[ImageUtils]    creating ANDROID-STYLE desaturated image...");
   
@@ -89,7 +122,7 @@ int p6[] = { 0, 0x02 };
     return NULL;
   }
   
-  // Fill with white background first
+  // Fill with white background first (redundant but safe)
   CGContextSetRGBFillColor(context, 1.0, 1.0, 1.0, 1.0);
   CGContextFillRect(context, CGRectMake(0, 0, width, height));
   
@@ -107,7 +140,7 @@ int p6[] = { 0, 0x02 };
   
   // Apply the desaturation filter
   CIContext *ciContext = [CIContext contextWithOptions:nil];
-  CIImage *ciImage = [CIImage imageWithCGImage:cgImage];
+  CIImage *ciImage = [CIImage imageWithCGImage:processImageRef];
   
   // Create color matrix filter (equivalent to Android's ColorMatrix)
   CIFilter *colorMatrixFilter = [CIFilter filterWithName:@"CIColorMatrix"];
@@ -125,7 +158,7 @@ int p6[] = { 0, 0x02 };
   if (!desaturatedImageRef) {
     NSLog(@"[ImageUtils]    ❌ Failed to create desaturated image, falling back to simple method");
     // Fallback to simple drawing
-    CGContextDrawImage(context, CGRectMake(0, 0, width, height), cgImage);
+    CGContextDrawImage(context, CGRectMake(0, 0, width, height), processImageRef);
   } else {
     NSLog(@"[ImageUtils]    ✅ Successfully created ANDROID-STYLE desaturated image");
     CGContextDrawImage(context, CGRectMake(0, 0, width, height), desaturatedImageRef);
@@ -226,7 +259,7 @@ int p6[] = { 0, 0x02 };
     NSLog(@"[ImageUtils]    last 10 pixels: %@", endSample);
   }
 
-  NSLog(@"[ImageUtils]    ✅ successfully converted to ANDROID-STYLE grayscale (%zu bytes)", dataSize);
+  NSLog(@"[ImageUtils]    ✅ successfully converted to ANDROID-STYLE grayscale with WHITE background (%zu bytes)", dataSize);
 
   return greyData;
 }
