@@ -395,10 +395,27 @@ int p6[] = { 0, 0x02 };
     
     int grayave = graytotal / (xsize * ysize);
     
-    // ⭐ ANDROID-STYLE THRESHOLD: Use only average (exactly like Android)
-    int threshold = grayave;
-    NSLog(@"[ImageUtils]    Gray stats - Min:%d, Max:%d, Avg:%d, Threshold:%d (ANDROID-EXACT)",
-          minGray, maxGray, grayave, threshold);
+    // ⭐ SPECIAL HANDLING: Detect completely white or near-white images
+    int threshold;
+    int grayRange = maxGray - minGray;
+    
+    if (grayRange <= 5 && minGray >= 250) {
+        // Completely white or near-white image (like logos on white background)
+        // Use a threshold much lower than the average to detect any content
+        threshold = minGray - 10; // Go below minimum to detect content
+        NSLog(@"[ImageUtils]    WHITE IMAGE detected (min=%d, range=%d), using content-detection threshold", minGray, grayRange);
+    } else if (grayRange <= 10 && grayave >= 240) {
+        // Very light image
+        threshold = grayave - 15;
+        NSLog(@"[ImageUtils]    VERY LIGHT IMAGE detected, using reduced threshold");
+    } else {
+        // Normal image - use Android-style average threshold
+        threshold = grayave;
+        NSLog(@"[ImageUtils]    NORMAL IMAGE, using Android-style average threshold");
+    }
+    
+    NSLog(@"[ImageUtils]    Gray stats - Min:%d, Max:%d, Avg:%d, Range:%d, Threshold:%d (SMART)",
+          minGray, maxGray, grayave, grayRange, threshold);
     
     // Second pass: apply threshold
     k = 0;
