@@ -284,13 +284,20 @@ int p6[] = { 0, 0x02 };
     
     // ⭐ EXTREME MEASURE: Inject A LOT of detectable content for logo visibility
     if (grayDataSize > 1000) {
-      // Create a MUCH LARGER pattern that fills most of the image
-      int logoWidth = MIN(200, width - 20);   // Much larger logo
-      int logoHeight = MIN(100, height - 20); // Much larger logo
-      int startX = 10;     // Starting position
-      int startY = 10;
+      // ⭐ FIRST: Log actual image dimensions to understand the canvas
+      NSLog(@"[ImageUtils]    📐 ACTUAL IMAGE DIMENSIONS: width=%zu, height=%zu, total pixels=%zu", 
+            width, height, grayDataSize);
       
-      NSLog(@"[ImageUtils]    🔧 Creating MASSIVE logo pattern: %dx%d pixels", logoWidth, logoHeight);
+      // Create a MUCH LARGER pattern that fills most of the image - BUT ADAPTIVE TO ACTUAL SIZE
+      int maxWidth = (int)width;
+      int maxHeight = (int)height;
+      int logoWidth = MIN(maxWidth - 40, maxWidth * 0.8);   // 80% of actual width, leave 40px margin
+      int logoHeight = MIN(maxHeight - 40, maxHeight * 0.6); // 60% of actual height, leave 40px margin
+      int startX = (maxWidth - logoWidth) / 2;     // Center horizontally
+      int startY = (maxHeight - logoHeight) / 2;   // Center vertically
+      
+      NSLog(@"[ImageUtils]    🎯 ADAPTIVE logo pattern: %dx%d at position (%d,%d) within %dx%d canvas", 
+            logoWidth, logoHeight, startX, startY, maxWidth, maxHeight);
       
       for (int y = startY; y < startY + logoHeight && y < height; y++) {
         for (int x = startX; x < startX + logoWidth && x < width; x++) {
@@ -309,12 +316,15 @@ int p6[] = { 0, 0x02 };
         }
       }
       
-      // Also create additional visible lines across the image
-      for (int y = 0; y < height; y += 20) {
+      // Also create additional visible lines across the image - BETTER SPACED
+      int lineSpacing = maxHeight / 10; // 10 lines across the height
+      if (lineSpacing < 5) lineSpacing = 5; // Minimum spacing
+      
+      for (int y = 0; y < height; y += lineSpacing) {
         for (int x = 0; x < width; x++) {
           int index = y * width + x;
           if (index < grayDataSize) {
-            greyData[index] = 100; // Horizontal lines every 20 pixels
+            greyData[index] = 100; // Horizontal lines
           }
         }
       }
@@ -326,7 +336,8 @@ int p6[] = { 0, 0x02 };
       greyData[3] = 200;  // Light
       greyData[4] = 250;  // Very light
       
-      NSLog(@"[ImageUtils]    🔧 INJECTED MASSIVE LOGO: %dx%d rectangle + checkerboard + horizontal lines", logoWidth, logoHeight);
+      NSLog(@"[ImageUtils]    🔧 INJECTED ADAPTIVE LOGO: %dx%d rectangle + checkerboard + %d horizontal lines", 
+            logoWidth, logoHeight, (int)(height / lineSpacing));
     }
   }
 
