@@ -381,11 +381,15 @@ int p6[] = { 0, 0x02 };
     int threshold;
     int grayRange = maxGray - minGray;
     
-    if (grayRange < 50) {
-        // Low contrast image - use a more aggressive threshold
-        // For images where everything is very light (like your logo), we need to be more aggressive
-        threshold = minGray + (grayRange * 0.3f); // Use 30% from minimum instead of average
-        NSLog(@"[ImageUtils]    LOW CONTRAST detected (range=%d), using aggressive threshold", grayRange);
+    if (grayRange < 30) {
+        // Very low contrast image - use very conservative threshold
+        // For logos with minimal contrast, we need to be very careful
+        threshold = minGray + (grayRange * 0.6f); // Use 60% from minimum (was 30%)
+        NSLog(@"[ImageUtils]    VERY LOW CONTRAST detected (range=%d), using conservative threshold", grayRange);
+    } else if (grayRange < 80) {
+        // Low contrast image - use moderately conservative threshold
+        threshold = minGray + (grayRange * 0.5f); // Use 50% from minimum
+        NSLog(@"[ImageUtils]    LOW CONTRAST detected (range=%d), using moderate threshold", grayRange);
     } else {
         // Normal contrast - use Android-style average
         threshold = grayave;
