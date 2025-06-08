@@ -180,18 +180,33 @@ int p6[] = { 0, 0x02 };
     uint8_t r = rgbData[idx];
     uint8_t g = rgbData[idx + 1]; 
     uint8_t b = rgbData[idx + 2];
+    uint8_t a = rgbData[idx + 3]; // Get alpha too
+    
+    // ⭐ DEBUG: Check if this is a non-white pixel  
+    if (i < 10 && (r < 250 || g < 250 || b < 250)) {
+      NSLog(@"[ImageUtils]    NON-WHITE pixel %zu: R=%d, G=%d, B=%d, A=%d", i, r, g, b, a);
+    }
     
     // Standard luminance formula (same as Android)
     uint8_t gray = (uint8_t)(0.299 * r + 0.587 * g + 0.114 * b);
     greyData[i] = gray;
+    
+    // ⭐ DEBUG: Log conversion for first few non-white pixels
+    if (i < 10 && gray < 250) {
+      NSLog(@"[ImageUtils]    RGB[%d,%d,%d] -> Gray=%d", r, g, b, gray);
+    }
   }
   
   free(rgbData);
   
-  // Sample grayscale data
+  // Sample grayscale data - IMPROVED to find non-white pixels
   NSLog(@"[ImageUtils]    SAMPLING final grayscale data:");
   NSMutableString *graySample = [NSMutableString string];
   int whiteCount = 0, blackCount = 0, grayCount = 0;
+  
+  // ⭐ BETTER SAMPLING: Find and show actual non-white pixels  
+  NSMutableString *nonWhiteFound = [NSMutableString string];
+  int nonWhiteGrayCount = 0;
   
   for (int i = 0; i < MIN(20, (int)grayDataSize); i++) {
     uint8_t pixelValue = greyData[i];
@@ -202,9 +217,21 @@ int p6[] = { 0, 0x02 };
     else grayCount++;
   }
   
+  // Search for non-white pixels in the entire image
+  for (size_t i = 0; i < grayDataSize && nonWhiteGrayCount < 10; i++) {
+    uint8_t pixelValue = greyData[i];
+    if (pixelValue < 250) {
+      [nonWhiteFound appendFormat:@"[%zu]=%d ", i, pixelValue];
+      nonWhiteGrayCount++;
+    }
+  }
+  
   NSLog(@"[ImageUtils]    First 20 grayscale pixels: %@", graySample);
   NSLog(@"[ImageUtils]    Quick analysis - Black(<85): %d, Gray(85-170): %d, White(>170): %d", 
         blackCount, grayCount, whiteCount);
+  NSLog(@"[ImageUtils]    🔍 NON-WHITE grayscale pixels found: %@", 
+        nonWhiteGrayCount > 0 ? nonWhiteFound : @"NONE!");
+  NSLog(@"[ImageUtils]    🔍 Total non-white grayscale pixels: %d", nonWhiteGrayCount);
 
   NSLog(@"[ImageUtils]    ✅ SIMPLIFIED conversion complete with EXPLICIT white background (%zu bytes)", grayDataSize);
 
