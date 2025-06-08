@@ -108,8 +108,33 @@ int p6[] = { 0, 0x02 };
   CGContextDrawImage(ctx, CGRectMake(0,0,width,height), cgImage);
   CGContextRelease(ctx);
   
+  // ⭐ ANDROID-STYLE ENHANCEMENT: Apply contrast enhancement for light images
+  // This helps with logos that appear very light in the original
+  NSLog(@"[ImageUtils]    applying contrast enhancement for better logo detection...");
+  
+  for (size_t i = 0; i < dataSize; i++) {
+    uint8_t originalValue = greyData[i];
+    
+    // Apply contrast stretch: enhance the difference between light and dark areas
+    // This is similar to what Android's ColorMatrix naturally does
+    float normalized = originalValue / 255.0f;
+    
+    // Apply gamma correction to darken mid-tones (good for logos)
+    float gamma = 0.7f; // Darken mid-tones
+    float enhanced = powf(normalized, gamma);
+    
+    // Apply contrast enhancement
+    float contrast = 1.5f; // Increase contrast
+    enhanced = (enhanced - 0.5f) * contrast + 0.5f;
+    
+    // Clamp to valid range
+    enhanced = fmaxf(0.0f, fminf(1.0f, enhanced));
+    
+    greyData[i] = (uint8_t)(enhanced * 255.0f);
+  }
+  
   // Sample and log some pixel values to debug conversion
-  NSLog(@"[ImageUtils]    sampling pixel values...");
+  NSLog(@"[ImageUtils]    sampling pixel values after enhancement...");
   int sampleSize = MIN(20, (int)dataSize);
   NSMutableString *pixelSample = [NSMutableString string];
   
@@ -123,8 +148,8 @@ int p6[] = { 0, 0x02 };
     else grayCount++;
   }
   
-  NSLog(@"[ImageUtils]    first %d pixels: %@", sampleSize, pixelSample);
-  NSLog(@"[ImageUtils]    quick analysis - Black(<85): %d, Gray(85-170): %d, White(>170): %d", 
+  NSLog(@"[ImageUtils]    first %d pixels (enhanced): %@", sampleSize, pixelSample);
+  NSLog(@"[ImageUtils]    enhanced analysis - Black(<85): %d, Gray(85-170): %d, White(>170): %d", 
         blackCount, grayCount, whiteCount);
   
   // Sample from middle and end too
@@ -134,17 +159,17 @@ int p6[] = { 0, 0x02 };
     for (int i = 0; i < 10 && (midIndex + i) < dataSize; i++) {
       [midSample appendFormat:@"%d ", greyData[midIndex + i]];
     }
-    NSLog(@"[ImageUtils]    middle 10 pixels: %@", midSample);
+    NSLog(@"[ImageUtils]    middle 10 pixels (enhanced): %@", midSample);
     
     int endIndex = (int)dataSize - 10;
     NSMutableString *endSample = [NSMutableString string];
     for (int i = 0; i < 10 && (endIndex + i) < dataSize; i++) {
       [endSample appendFormat:@"%d ", greyData[endIndex + i]];
     }
-    NSLog(@"[ImageUtils]    last 10 pixels: %@", endSample);
+    NSLog(@"[ImageUtils]    last 10 pixels (enhanced): %@", endSample);
   }
 
-  NSLog(@"[ImageUtils]    ✅ successfully converted to grayscale (%zu bytes)", dataSize);
+  NSLog(@"[ImageUtils]    ✅ successfully converted to enhanced grayscale (%zu bytes)", dataSize);
 
   return greyData;
 }
