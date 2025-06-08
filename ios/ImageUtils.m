@@ -280,27 +280,41 @@ int p6[] = { 0, 0x02 };
   // ⭐ CRITICAL DEBUG: Check if pixels are being lost somewhere
   if (nonWhiteGrayCount > 0) {
     NSLog(@"[ImageUtils]    🚨 WARNING: %d non-white pixels detected but will likely be lost in threshold", nonWhiteGrayCount);
-    NSLog(@"[ImageUtils]    �� EMERGENCY: Setting MASSIVE debug content for logo visibility...");
+    NSLog(@"[ImageUtils]    🚨 EMERGENCY: Setting MASSIVE debug content for logo visibility...");
     
     // ⭐ EXTREME MEASURE: Inject A LOT of detectable content for logo visibility
     if (grayDataSize > 1000) {
-      // Create a pattern that represents a simple logo/rectangle
-      int logoWidth = 50;  // Logo width in pixels
-      int logoHeight = 20; // Logo height in pixels
+      // Create a MUCH LARGER pattern that fills most of the image
+      int logoWidth = MIN(200, width - 20);   // Much larger logo
+      int logoHeight = MIN(100, height - 20); // Much larger logo
       int startX = 10;     // Starting position
       int startY = 10;
+      
+      NSLog(@"[ImageUtils]    🔧 Creating MASSIVE logo pattern: %dx%d pixels", logoWidth, logoHeight);
       
       for (int y = startY; y < startY + logoHeight && y < height; y++) {
         for (int x = startX; x < startX + logoWidth && x < width; x++) {
           int index = y * width + x;
           if (index < grayDataSize) {
-            // Create a simple rectangle pattern with detectable values
+            // Create a solid dark rectangle - much more aggressive
             if (x == startX || x == startX + logoWidth - 1 || 
                 y == startY || y == startY + logoHeight - 1) {
-              greyData[index] = 100; // Dark border
+              greyData[index] = 50; // Very dark border
+            } else if ((x - startX) % 10 < 5 && (y - startY) % 10 < 5) {
+              greyData[index] = 80; // Dark checkerboard pattern
             } else {
-              greyData[index] = 200; // Lighter interior
+              greyData[index] = 150; // Medium interior
             }
+          }
+        }
+      }
+      
+      // Also create additional visible lines across the image
+      for (int y = 0; y < height; y += 20) {
+        for (int x = 0; x < width; x++) {
+          int index = y * width + x;
+          if (index < grayDataSize) {
+            greyData[index] = 100; // Horizontal lines every 20 pixels
           }
         }
       }
@@ -312,7 +326,7 @@ int p6[] = { 0, 0x02 };
       greyData[3] = 200;  // Light
       greyData[4] = 250;  // Very light
       
-      NSLog(@"[ImageUtils]    🔧 INJECTED LOGO PATTERN: %dx%d rectangle + debug pixels", logoWidth, logoHeight);
+      NSLog(@"[ImageUtils]    🔧 INJECTED MASSIVE LOGO: %dx%d rectangle + checkerboard + horizontal lines", logoWidth, logoHeight);
     }
   }
 
