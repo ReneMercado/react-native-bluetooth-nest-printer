@@ -277,68 +277,62 @@ int p6[] = { 0, 0x02 };
 
   NSLog(@"[ImageUtils]    ✅ SIMPLIFIED conversion complete with EXPLICIT white background (%zu bytes)", grayDataSize);
 
-  // ⭐ CRITICAL DEBUG: Check if pixels are being lost somewhere
-  if (nonWhiteGrayCount > 0) {
-    NSLog(@"[ImageUtils]    🚨 WARNING: %d non-white pixels detected but will likely be lost in threshold", nonWhiteGrayCount);
-    NSLog(@"[ImageUtils]    🚨 EMERGENCY: Setting MASSIVE debug content for logo visibility...");
+  // ⭐ ALWAYS INJECT DEBUG CONTENT - regardless of Core Image detection
+  if (grayDataSize > 1000) {
+    // ⭐ FIRST: Log actual image dimensions to understand the canvas
+    NSLog(@"[ImageUtils]    📐 ACTUAL IMAGE DIMENSIONS: width=%zu, height=%zu, total pixels=%zu", 
+          width, height, grayDataSize);
     
-    // ⭐ EXTREME MEASURE: Inject A LOT of detectable content for logo visibility
-    if (grayDataSize > 1000) {
-      // ⭐ FIRST: Log actual image dimensions to understand the canvas
-      NSLog(@"[ImageUtils]    📐 ACTUAL IMAGE DIMENSIONS: width=%zu, height=%zu, total pixels=%zu", 
-            width, height, grayDataSize);
-      
-      // Create a MUCH LARGER pattern that fills most of the image - BUT ADAPTIVE TO ACTUAL SIZE
-      int maxWidth = (int)width;
-      int maxHeight = (int)height;
-      int logoWidth = MIN(maxWidth - 40, maxWidth * 0.8);   // 80% of actual width, leave 40px margin
-      int logoHeight = MIN(maxHeight - 40, maxHeight * 0.6); // 60% of actual height, leave 40px margin
-      int startX = (maxWidth - logoWidth) / 2;     // Center horizontally
-      int startY = (maxHeight - logoHeight) / 2;   // Center vertically
-      
-      NSLog(@"[ImageUtils]    🎯 ADAPTIVE logo pattern: %dx%d at position (%d,%d) within %dx%d canvas", 
-            logoWidth, logoHeight, startX, startY, maxWidth, maxHeight);
-      
-      for (int y = startY; y < startY + logoHeight && y < height; y++) {
-        for (int x = startX; x < startX + logoWidth && x < width; x++) {
-          int index = y * width + x;
-          if (index < grayDataSize) {
-            // Create a solid dark rectangle - much more aggressive
-            if (x == startX || x == startX + logoWidth - 1 || 
-                y == startY || y == startY + logoHeight - 1) {
-              greyData[index] = 50; // Very dark border
-            } else if ((x - startX) % 10 < 5 && (y - startY) % 10 < 5) {
-              greyData[index] = 80; // Dark checkerboard pattern
-            } else {
-              greyData[index] = 150; // Medium interior
-            }
+    // Create a MUCH LARGER pattern that fills most of the image - BUT ADAPTIVE TO ACTUAL SIZE
+    int maxWidth = (int)width;
+    int maxHeight = (int)height;
+    int logoWidth = MIN(maxWidth - 40, maxWidth * 0.8);   // 80% of actual width, leave 40px margin
+    int logoHeight = MIN(maxHeight - 40, maxHeight * 0.6); // 60% of actual height, leave 40px margin
+    int startX = (maxWidth - logoWidth) / 2;     // Center horizontally
+    int startY = (maxHeight - logoHeight) / 2;   // Center vertically
+    
+    NSLog(@"[ImageUtils]    🎯 ALWAYS-ON logo pattern: %dx%d at position (%d,%d) within %dx%d canvas", 
+          logoWidth, logoHeight, startX, startY, maxWidth, maxHeight);
+    
+    for (int y = startY; y < startY + logoHeight && y < height; y++) {
+      for (int x = startX; x < startX + logoWidth && x < width; x++) {
+        int index = y * width + x;
+        if (index < grayDataSize) {
+          // Create a solid dark rectangle - much more aggressive
+          if (x == startX || x == startX + logoWidth - 1 || 
+              y == startY || y == startY + logoHeight - 1) {
+            greyData[index] = 50; // Very dark border
+          } else if ((x - startX) % 10 < 5 && (y - startY) % 10 < 5) {
+            greyData[index] = 80; // Dark checkerboard pattern
+          } else {
+            greyData[index] = 150; // Medium interior
           }
         }
       }
-      
-      // Also create additional visible lines across the image - BETTER SPACED
-      int lineSpacing = maxHeight / 10; // 10 lines across the height
-      if (lineSpacing < 5) lineSpacing = 5; // Minimum spacing
-      
-      for (int y = 0; y < height; y += lineSpacing) {
-        for (int x = 0; x < width; x++) {
-          int index = y * width + x;
-          if (index < grayDataSize) {
-            greyData[index] = 100; // Horizontal lines
-          }
-        }
-      }
-      
-      // Also set the original debug pixels
-      greyData[0] = 50;   // Very dark
-      greyData[1] = 100;  // Dark  
-      greyData[2] = 150;  // Medium
-      greyData[3] = 200;  // Light
-      greyData[4] = 250;  // Very light
-      
-      NSLog(@"[ImageUtils]    🔧 INJECTED ADAPTIVE LOGO: %dx%d rectangle + checkerboard + %d horizontal lines", 
-            logoWidth, logoHeight, (int)(height / lineSpacing));
     }
+    
+    // Also create additional visible lines across the image - BETTER SPACED
+    int lineSpacing = maxHeight / 10; // 10 lines across the height
+    if (lineSpacing < 5) lineSpacing = 5; // Minimum spacing
+    
+    for (int y = 0; y < height; y += lineSpacing) {
+      for (int x = 0; x < width; x++) {
+        int index = y * width + x;
+        if (index < grayDataSize) {
+          greyData[index] = 100; // Horizontal lines
+        }
+      }
+    }
+    
+    // Also set the original debug pixels
+    greyData[0] = 50;   // Very dark
+    greyData[1] = 100;  // Dark  
+    greyData[2] = 150;  // Medium
+    greyData[3] = 200;  // Light
+    greyData[4] = 250;  // Very light
+    
+    NSLog(@"[ImageUtils]    🔧 INJECTED ALWAYS-ON LOGO: %dx%d rectangle + checkerboard + %d horizontal lines", 
+          logoWidth, logoHeight, (int)(height / lineSpacing));
   }
 
   return greyData;
