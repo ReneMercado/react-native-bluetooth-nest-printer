@@ -87,12 +87,18 @@ int p6[] = { 0, 0x02 };
 
   NSLog(@"[ImageUtils]    creating color space and context...");
   CGColorSpaceRef graySpace = CGColorSpaceCreateDeviceGray();
+  if (!graySpace) {
+    NSLog(@"[ImageUtils]    ❌ Failed to create gray color space");
+    free(greyData);
+    return NULL;
+  }
+  
   CGContextRef ctx = CGBitmapContextCreate(
     greyData,
     width,
     height,
-    8,
-    width,
+    8,                               // bits per component
+    width,                          // bytes per row (1 byte per pixel for grayscale)
     graySpace,
     kCGImageAlphaNone
   );
@@ -105,8 +111,20 @@ int p6[] = { 0, 0x02 };
   }
 
   NSLog(@"[ImageUtils]    drawing image into context...");
+  // Clear the context first
+  CGContextSetFillColorWithColor(ctx, CGColorGetConstantColor(kCGColorWhite));
+  CGContextFillRect(ctx, CGRectMake(0, 0, width, height));
+  
+  // Draw the image
   CGContextDrawImage(ctx, CGRectMake(0,0,width,height), cgImage);
   CGContextRelease(ctx);
+  
+  // Validate that we actually got grayscale data
+  int nonZeroCount = 0;
+  for (int i = 0; i < MIN(100, (int)dataSize); i++) {
+    if (greyData[i] != 0) nonZeroCount++;
+  }
+  NSLog(@"[ImageUtils]    validation: %d non-zero pixels in first 100", nonZeroCount);
   
   // Sample and log some pixel values to debug conversion
   NSLog(@"[ImageUtils]    sampling pixel values...");
