@@ -119,12 +119,12 @@ int p6[] = { 0, 0x02 };
     // This is similar to what Android's ColorMatrix naturally does
     float normalized = originalValue / 255.0f;
     
-    // Apply gamma correction to darken mid-tones (good for logos)
-    float gamma = 0.7f; // Darken mid-tones
+    // Apply gamma correction to darken mid-tones (good for logos) - REDUCED
+    float gamma = 0.85f; // Less aggressive gamma (was 0.7)
     float enhanced = powf(normalized, gamma);
     
-    // Apply contrast enhancement
-    float contrast = 1.5f; // Increase contrast
+    // Apply contrast enhancement - REDUCED
+    float contrast = 1.2f; // Less aggressive contrast (was 1.5)
     enhanced = (enhanced - 0.5f) * contrast + 0.5f;
     
     // Clamp to valid range
