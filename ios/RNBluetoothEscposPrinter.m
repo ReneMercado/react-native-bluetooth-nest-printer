@@ -287,9 +287,10 @@ RCT_EXPORT_METHOD(printerAlign:(NSInteger) align
         
         //{ESC, 'a', align }
         NSMutableData *toSend = [[NSMutableData alloc] init];
-        [toSend appendBytes:ESC length:sizeof(ESC)];
-        [toSend appendBytes:A length:sizeof(A)];
-        [toSend appendBytes:&align length:sizeof(align)];
+        [toSend appendBytes:ESC length:1];
+        [toSend appendBytes:A length:1];
+        Byte alignByte = (Byte)align;
+        [toSend appendBytes:&alignByte length:1];
         pendingReject = reject;
         pendingResolve = resolve;
         [RNBluetoothManager writeValue:toSend withDelegate:self];
