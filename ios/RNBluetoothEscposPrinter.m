@@ -666,8 +666,8 @@ RCT_EXPORT_METHOD(printQRCode:(NSString *)content
                                              height:size];
   free(gray);
 
-  // 8) Generate ESC/POS commands using line-by-line (faster)
-  NSData *cmds = [ImageUtils eachLinePixToCmd:bw
+  // 8) Generate ESC/POS commands using full image (faster - like Android)
+  NSData *cmds = [ImageUtils fullImageToCmd:bw
                                       nWidth:size
                                      nHeight:size
                                        nMode:0
