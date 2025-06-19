@@ -275,23 +275,24 @@ RCT_EXPORT_METHOD(rotate:(NSInteger *)rotate
 //        }
 }
 
-RCT_EXPORT_METHOD(printerAlign:(NSInteger *) align
+RCT_EXPORT_METHOD(printerAlign:(NSInteger) align
                    withResolver:(RCTPromiseResolveBlock) resolve rejecter:(RCTPromiseRejectBlock) reject)
 {
     if(RNBluetoothManager.isConnected){
-        //if ((align < 0 || align > 2) && (align < 48 || align > 50)) return null;
-        if((align < 0 || align > 2) && (align < 48 || align > 50)){
-             reject(@"INVALD_PARAMETERS",@"INVALD_PARAMETERS",nil);
-        }else{
-            //{ESC, 'a', 0x00 }
-            NSMutableData *toSend = [[NSMutableData alloc] init];
-            [toSend appendBytes:ESC length:sizeof(ESC)];
-            [toSend appendBytes:A length:sizeof(A)];
-            [toSend appendBytes:&align length:sizeof(align)];
-            pendingReject =reject;
-            pendingResolve =resolve;
-            [RNBluetoothManager writeValue:toSend withDelegate:self];
+        // Validate alignment values: 0=left, 1=center, 2=right
+        if(align < 0 || align > 2){
+             reject(@"INVALID_PARAMETERS",@"Alignment must be 0 (left), 1 (center), or 2 (right)",nil);
+             return;
         }
+        
+        //{ESC, 'a', align }
+        NSMutableData *toSend = [[NSMutableData alloc] init];
+        [toSend appendBytes:ESC length:sizeof(ESC)];
+        [toSend appendBytes:A length:sizeof(A)];
+        [toSend appendBytes:&align length:sizeof(align)];
+        pendingReject = reject;
+        pendingResolve = resolve;
+        [RNBluetoothManager writeValue:toSend withDelegate:self];
     }else{
          reject(@"COMMAND_NOT_SEND",@"COMMAND_NOT_SEND",nil);
     }
