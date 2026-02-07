@@ -412,8 +412,7 @@ RCT_EXPORT_METHOD(connect:(NSString *)address
  */
 - (void)peripheral:(CBPeripheral *)peripheral didDiscoverCharacteristicsForService:(CBService *)service error:(nullable NSError *)error{
     if(toWrite && connected
-       && [connected.identifier.UUIDString isEqualToString:peripheral.identifier.UUIDString]
-       && [service.UUID.UUIDString isEqualToString:supportServices[0].UUIDString]){
+       && [connected.identifier.UUIDString isEqualToString:peripheral.identifier.UUIDString]){
         if(error){
             NSLog(@"Discrover charactoreristics error:%@",error);
            if(writeDataDelegate)
@@ -421,25 +420,38 @@ RCT_EXPORT_METHOD(connect:(NSString *)address
                [writeDataDelegate didWriteDataToBle:false];
                return;
            }
-        }
+    }
+        BOOL wrote = false;
         for(CBCharacteristic *cc in service.characteristics){
             NSLog(@"Characterstic found: %@ in service: %@" ,cc,service.UUID.UUIDString);
-            if([cc.UUID.UUIDString isEqualToString:[writeableCharactiscs objectForKey: supportServices[0]]]){
+            BOOL isPreferredService = supportServices
+              && [service.UUID.UUIDString isEqualToString:supportServices[0].UUIDString];
+            BOOL isPreferredChar = isPreferredService
+              && [cc.UUID.UUIDString isEqualToString:[writeableCharactiscs objectForKey: supportServices[0]]];
+            BOOL canWrite = (cc.properties & CBCharacteristicPropertyWrite)
+              || (cc.properties & CBCharacteristicPropertyWriteWithoutResponse);
+
+            if(isPreferredChar || (!wrote && canWrite && !isPreferredService)){
                 @try{
-                    [connected writeValue:toWrite forCharacteristic:cc type:CBCharacteristicWriteWithoutResponse];
-                   if(writeDataDelegate) [writeDataDelegate didWriteDataToBle:true];
+                    CBCharacteristicWriteType writeType = (cc.properties & CBCharacteristicPropertyWriteWithoutResponse)
+                      ? CBCharacteristicWriteWithoutResponse
+                      : CBCharacteristicWriteWithResponse;
+                    [connected writeValue:toWrite forCharacteristic:cc type:writeType];
+                    wrote = true;
+                    if(writeDataDelegate) [writeDataDelegate didWriteDataToBle:true];
                     if(toWrite){
                         NSLog(@"Value wrote: %lu",[toWrite length]);
                     }
+                    toWrite = nil;
                 }
                 @catch(NSException *e){
                     NSLog(@"ERRO IN WRITE VALUE: %@",e);
-                      [writeDataDelegate didWriteDataToBle:false];
+                    if(writeDataDelegate){
+                        [writeDataDelegate didWriteDataToBle:false];
+                    }
                 }
             }
         }
-        
-        
     }
     
     if(error){
