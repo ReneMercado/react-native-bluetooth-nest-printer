@@ -18,3 +18,23 @@ export interface BluetoothProps {
 }
 
 export function BluetoothManager(props: BluetoothProps): any;
+
+export interface WriteBitmapOptions {
+  /** Barcode / order code (drawn as pseudo-barcode) */
+  code?: string;
+  /** Text lines below barcode */
+  lines?: string[];
+  /** Label width in mm */
+  widthMm: number;
+  /** Label height in mm */
+  heightMm: number;
+  /** Dots per mm (~8 for 203 DPI). Default 8 */
+  dotsPerMm?: number;
+  /** Invert raster for white background / black text. Default true */
+  invert?: boolean;
+}
+
+/**
+ * Build TSPL bitmap label and send via BLE. Reusable across apps (iOS & Android).
+ */
+export function writeBitmap(options: WriteBitmapOptions): Promise<void>;

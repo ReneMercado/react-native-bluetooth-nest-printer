@@ -153,8 +153,11 @@ BluetoothEscposPrinter.DEVICE_WIDTH = {
   WIDTH_58: 384,
   WIDTH_80: 576,
 };
+const { writeBitmap } = require("./writeBitmap.js");
+
 module.exports = {
   BluetoothManager,
   BluetoothEscposPrinter,
   BluetoothTscPrinter,
+  writeBitmap,
 };
