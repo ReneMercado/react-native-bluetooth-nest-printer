@@ -35,6 +35,7 @@ static NSTimer *timer;
     @try{
         writeDataDelegate = delegate;
         toWrite = data;
+        NSLog(@"[BLE] writeValue length=%lu connected=%@", (unsigned long)[data length], connected);
         connected.delegate = instance;
         [connected discoverServices:supportServices];
 //    [connected writeValue:data forCharacteristic:[writeableCharactiscs objectForKey:supportServices[0]] type:CBCharacteristicWriteWithoutResponse];
@@ -432,6 +433,7 @@ RCT_EXPORT_METHOD(connect:(NSString *)address
                 hasPreferred = true;
             }
         }
+        NSLog(@"[BLE] service %@ hasPreferred=%@", service.UUID.UUIDString, hasPreferred ? @"YES" : @"NO");
         for(CBCharacteristic *cc in service.characteristics){
             NSLog(@"Characterstic found: %@ in service: %@" ,cc,service.UUID.UUIDString);
             BOOL isPreferredService = supportServices
@@ -446,6 +448,7 @@ RCT_EXPORT_METHOD(connect:(NSString *)address
                     CBCharacteristicWriteType writeType = (cc.properties & CBCharacteristicPropertyWriteWithoutResponse)
                       ? CBCharacteristicWriteWithoutResponse
                       : CBCharacteristicWriteWithResponse;
+                    NSLog(@"[BLE] writing to %@ type=%@", cc.UUID.UUIDString, writeType == CBCharacteristicWriteWithoutResponse ? @"withoutResponse" : @"withResponse");
                     [connected writeValue:toWrite forCharacteristic:cc type:writeType];
                     wrote = true;
                     if(toWrite){
@@ -457,6 +460,7 @@ RCT_EXPORT_METHOD(connect:(NSString *)address
                 }
             }
         }
+        NSLog(@"[BLE] write complete wrote=%@", wrote ? @"YES" : @"NO");
         if(writeDataDelegate){
             [writeDataDelegate didWriteDataToBle:wrote];
         }
