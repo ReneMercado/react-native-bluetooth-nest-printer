@@ -14,6 +14,7 @@ export interface BluetoothProps {
   disableBluetooth?: Function;
   scanDevices?: Promise<Function>;
   connect?: Promise<Function>;
+  writeRaw?: (data: string) => Promise<void>;
 }
 
 export function BluetoothManager(props: BluetoothProps): any;

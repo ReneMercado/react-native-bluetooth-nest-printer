@@ -25,6 +25,8 @@ static RNBluetoothManager *instance;
 static NSObject<WriteDataToBleDelegate> *writeDataDelegate;// delegate of write data resule;
 static NSData *toWrite;
 static NSTimer *timer;
+static RCTPromiseResolveBlock rawWriteResolve;
+static RCTPromiseRejectBlock rawWriteReject;
 
 +(Boolean)isConnected{
     return !(connected==nil);
@@ -214,6 +216,28 @@ RCT_EXPORT_METHOD(connect:(NSString *)address
         //Callbacks:
         //centralManager:didDiscoverPeripheral:advertisementData:RSSI:
     }
+}
+
+RCT_EXPORT_METHOD(writeRaw:(NSString *)data
+                  withResolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+    if(![RNBluetoothManager isConnected]){
+        reject(@"NOT_CONNECTED",@"NOT_CONNECTED",nil);
+        return;
+    }
+    if(!data || [data length] == 0){
+        reject(@"INVALID_DATA",@"INVALID_DATA",nil);
+        return;
+    }
+    NSData *payload = [data dataUsingEncoding:NSUTF8StringEncoding];
+    if(!payload){
+        reject(@"ENCODING_ERROR",@"ENCODING_ERROR",nil);
+        return;
+    }
+    rawWriteResolve = resolve;
+    rawWriteReject = reject;
+    [RNBluetoothManager writeValue:payload withDelegate:self];
 }
 //unpaire(address)
 
@@ -592,6 +616,18 @@ RCT_EXPORT_METHOD(connect:(NSString *)address
     NSLog(@"Write bluetooth success.");
     if(writeDataDelegate){
         [writeDataDelegate didWriteDataToBle:true];
+    }
+}
+
+- (void) didWriteDataToBle: (BOOL)success{
+    if(rawWriteResolve || rawWriteReject){
+        if(success){
+            if(rawWriteResolve) rawWriteResolve(nil);
+        }else{
+            if(rawWriteReject) rawWriteReject(@"WRITE_FAILED",@"WRITE_FAILED",nil);
+        }
+        rawWriteResolve = nil;
+        rawWriteReject = nil;
     }
 }
  

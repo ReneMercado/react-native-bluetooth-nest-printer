@@ -221,6 +221,25 @@ public class RNBluetoothManagerModule extends ReactContextBaseJavaModule
     }
 
     @ReactMethod
+    public void writeRaw(String data, final Promise promise) {
+        if (mService == null || mService.getState() != BluetoothService.STATE_CONNECTED) {
+            promise.reject("NOT_CONNECTED");
+            return;
+        }
+        if (data == null || data.length() == 0) {
+            promise.reject("INVALID_DATA");
+            return;
+        }
+        try {
+            byte[] bytes = data.getBytes("UTF-8");
+            mService.write(bytes);
+            promise.resolve(null);
+        } catch (Exception e) {
+            promise.reject("WRITE_FAILED", e);
+        }
+    }
+
+    @ReactMethod
     public void unpaire(String address,final Promise promise){
         BluetoothAdapter adapter = this.getBluetoothAdapter();
         if (adapter!=null && adapter.isEnabled()) {
