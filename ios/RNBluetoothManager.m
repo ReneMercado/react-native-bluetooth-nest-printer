@@ -422,6 +422,16 @@ RCT_EXPORT_METHOD(connect:(NSString *)address
            }
     }
         BOOL wrote = false;
+        BOOL hasPreferred = false;
+        for(CBCharacteristic *cc in service.characteristics){
+            BOOL isPreferredService = supportServices
+              && [service.UUID.UUIDString isEqualToString:supportServices[0].UUIDString];
+            BOOL isPreferredChar = isPreferredService
+              && [cc.UUID.UUIDString isEqualToString:[writeableCharactiscs objectForKey: supportServices[0]]];
+            if (isPreferredChar) {
+                hasPreferred = true;
+            }
+        }
         for(CBCharacteristic *cc in service.characteristics){
             NSLog(@"Characterstic found: %@ in service: %@" ,cc,service.UUID.UUIDString);
             BOOL isPreferredService = supportServices
@@ -431,26 +441,27 @@ RCT_EXPORT_METHOD(connect:(NSString *)address
             BOOL canWrite = (cc.properties & CBCharacteristicPropertyWrite)
               || (cc.properties & CBCharacteristicPropertyWriteWithoutResponse);
 
-            if(isPreferredChar || (!wrote && canWrite && !isPreferredService)){
+            if(isPreferredChar || (!hasPreferred && canWrite)){
                 @try{
                     CBCharacteristicWriteType writeType = (cc.properties & CBCharacteristicPropertyWriteWithoutResponse)
                       ? CBCharacteristicWriteWithoutResponse
                       : CBCharacteristicWriteWithResponse;
                     [connected writeValue:toWrite forCharacteristic:cc type:writeType];
                     wrote = true;
-                    if(writeDataDelegate) [writeDataDelegate didWriteDataToBle:true];
                     if(toWrite){
                         NSLog(@"Value wrote: %lu",[toWrite length]);
                     }
-                    toWrite = nil;
                 }
                 @catch(NSException *e){
                     NSLog(@"ERRO IN WRITE VALUE: %@",e);
-                    if(writeDataDelegate){
-                        [writeDataDelegate didWriteDataToBle:false];
-                    }
                 }
             }
+        }
+        if(writeDataDelegate){
+            [writeDataDelegate didWriteDataToBle:wrote];
+        }
+        if(wrote){
+            toWrite = nil;
         }
     }
     
