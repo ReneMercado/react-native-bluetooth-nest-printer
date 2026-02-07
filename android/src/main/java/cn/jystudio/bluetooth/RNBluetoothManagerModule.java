@@ -12,6 +12,7 @@ import android.content.pm.PackageManager;
 import android.os.Bundle;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import android.util.Base64;
 import android.util.Log;
 import android.widget.Toast;
 import com.facebook.react.bridge.*;
@@ -231,7 +232,13 @@ public class RNBluetoothManagerModule extends ReactContextBaseJavaModule
             return;
         }
         try {
-            byte[] bytes = data.getBytes("UTF-8");
+            byte[] bytes;
+            if (data.startsWith("BASE64:")) {
+                String base64 = data.substring(7);
+                bytes = Base64.decode(base64, Base64.DEFAULT);
+            } else {
+                bytes = data.getBytes("UTF-8");
+            }
             mService.write(bytes);
             promise.resolve(null);
         } catch (Exception e) {

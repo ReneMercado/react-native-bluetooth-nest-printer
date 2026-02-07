@@ -230,7 +230,13 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
         reject(@"INVALID_DATA",@"INVALID_DATA",nil);
         return;
     }
-    NSData *payload = [data dataUsingEncoding:NSUTF8StringEncoding];
+    NSData *payload = nil;
+    if([data hasPrefix:@"BASE64:"]){
+        NSString *base64 = [data substringFromIndex:7];
+        payload = [[NSData alloc] initWithBase64EncodedString:base64 options:0];
+    }else{
+        payload = [data dataUsingEncoding:NSUTF8StringEncoding];
+    }
     if(!payload){
         reject(@"ENCODING_ERROR",@"ENCODING_ERROR",nil);
         return;
