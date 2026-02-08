@@ -32,6 +32,12 @@ export interface WriteBitmapOptions {
   dotsPerMm?: number;
   /** Invert raster for white background / black text. Default true */
   invert?: boolean;
+  /** Optional 1-bit logo raster (base64); width must match label widthBytes */
+  logoRasterBase64?: string;
+  /** Logo width in bytes (must equal ceil(widthMm*dotsPerMm/8)) */
+  logoWidthBytes?: number;
+  /** Logo height in dots */
+  logoHeightDots?: number;
 }
 
 /**

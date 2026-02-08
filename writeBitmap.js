@@ -174,17 +174,29 @@ function drawPseudoBarcode(
   }
 }
 
+function decodeBase64ToBytes(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i) & 0xff;
+  }
+  return bytes;
+}
+
 /**
  * Build TSPL bitmap payload and send via BluetoothManager.writeRaw.
  * Works on both iOS and Android (BLE); payload is sent as BASE64 for binary raster.
  *
  * @param {Object} options
- * @param {string} options.code - Barcode / order code (drawn as pseudo-barcode)
- * @param {string[]} options.lines - Text lines below barcode (e.g. ['Pedido: WD-14', 'Nombre'])
+ * @param {string} [options.code='CODE'] - Barcode / order code (drawn as pseudo-barcode)
+ * @param {string[]} [options.lines=[]] - Text lines below barcode
  * @param {number} options.widthMm - Label width in mm
  * @param {number} options.heightMm - Label height in mm
  * @param {number} [options.dotsPerMm=8] - Dots per mm (~8 for 203 DPI)
  * @param {boolean} [options.invert=true] - If true, invert raster for white background / black text
+ * @param {string} [options.logoRasterBase64] - Optional 1-bit logo raster (base64), same width as label
+ * @param {number} [options.logoWidthBytes] - Logo width in bytes (must equal widthBytes)
+ * @param {number} [options.logoHeightDots] - Logo height in dots
  * @returns {Promise<void>}
  */
 function writeBitmap(options) {
@@ -195,6 +207,9 @@ function writeBitmap(options) {
     heightMm,
     dotsPerMm = 8,
     invert = true,
+    logoRasterBase64,
+    logoWidthBytes,
+    logoHeightDots,
   } = options;
 
   if (widthMm == null || heightMm == null) {
@@ -208,11 +223,34 @@ function writeBitmap(options) {
 
   const mmToDots = (mm) => Math.round(mm * dotsPerMm);
   const marginDots = mmToDots(4);
+  const hasLogo =
+    logoRasterBase64 &&
+    logoWidthBytes != null &&
+    logoHeightDots != null &&
+    logoWidthBytes === widthBytes &&
+    logoHeightDots > 0 &&
+    logoHeightDots < heightDots;
+  const contentAreaTop = hasLogo ? logoHeightDots + mmToDots(2) : 0;
+
+  if (hasLogo) {
+    try {
+      const logoBytes = decodeBase64ToBytes(logoRasterBase64);
+      const logoSize = logoWidthBytes * logoHeightDots;
+      const copyLen = Math.min(logoSize, logoBytes.length, widthBytes * logoHeightDots);
+      for (let i = 0; i < copyLen; i += 1) {
+        buffer[i] = logoBytes[i];
+      }
+    } catch (e) {
+      // ignore invalid logo, continue without it
+    }
+  }
+
   const barcodeHeightMm = Math.min(30, Math.max(12, heightMm * 0.4));
   const barcodeHeightDots = mmToDots(barcodeHeightMm);
   const lineHeightMm = Math.max(4, heightMm * 0.12);
   const lineHeightDots = mmToDots(lineHeightMm);
-  const textStartY = marginDots + barcodeHeightDots + mmToDots(2);
+  const barcodeY = contentAreaTop + marginDots;
+  const textStartY = contentAreaTop + marginDots + barcodeHeightDots + mmToDots(2);
 
   drawPseudoBarcode(
     buffer,
@@ -220,7 +258,7 @@ function writeBitmap(options) {
     widthDots,
     heightDots,
     marginDots,
-    marginDots,
+    barcodeY,
     widthDots - marginDots * 2,
     barcodeHeightDots,
     String(code)
