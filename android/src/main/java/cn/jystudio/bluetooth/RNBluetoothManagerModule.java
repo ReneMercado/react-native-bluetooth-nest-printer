@@ -12,6 +12,7 @@ import android.content.pm.PackageManager;
 import android.os.Bundle;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import android.util.Base64;
 import android.util.Log;
 import android.widget.Toast;
 import com.facebook.react.bridge.*;
@@ -218,6 +219,31 @@ public class RNBluetoothManagerModule extends ReactContextBaseJavaModule
             promise.reject("BT NOT ENABLED");
         }
 
+    }
+
+    @ReactMethod
+    public void writeRaw(String data, final Promise promise) {
+        if (mService == null || mService.getState() != BluetoothService.STATE_CONNECTED) {
+            promise.reject("NOT_CONNECTED");
+            return;
+        }
+        if (data == null || data.length() == 0) {
+            promise.reject("INVALID_DATA");
+            return;
+        }
+        try {
+            byte[] bytes;
+            if (data.startsWith("BASE64:")) {
+                String base64 = data.substring(7);
+                bytes = Base64.decode(base64, Base64.DEFAULT);
+            } else {
+                bytes = data.getBytes("UTF-8");
+            }
+            mService.write(bytes);
+            promise.resolve(null);
+        } catch (Exception e) {
+            promise.reject("WRITE_FAILED", e);
+        }
     }
 
     @ReactMethod

@@ -14,7 +14,7 @@
 - (void) didWriteDataToBle: (BOOL)success;
 @end
 
-@interface RNBluetoothManager <CBCentralManagerDelegate,CBPeripheralDelegate> : RCTEventEmitter <RCTBridgeModule>
+@interface RNBluetoothManager <CBCentralManagerDelegate,CBPeripheralDelegate,WriteDataToBleDelegate> : RCTEventEmitter <RCTBridgeModule>
 @property (strong, nonatomic) CBCentralManager      *centralManager;
 @property (nonatomic,copy) RCTPromiseResolveBlock scanResolveBlock;
 @property (nonatomic,copy) RCTPromiseRejectBlock scanRejectBlock;

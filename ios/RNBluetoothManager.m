@@ -25,6 +25,8 @@ static RNBluetoothManager *instance;
 static NSObject<WriteDataToBleDelegate> *writeDataDelegate;// delegate of write data resule;
 static NSData *toWrite;
 static NSTimer *timer;
+static RCTPromiseResolveBlock rawWriteResolve;
+static RCTPromiseRejectBlock rawWriteReject;
 
 +(Boolean)isConnected{
     return !(connected==nil);
@@ -35,6 +37,7 @@ static NSTimer *timer;
     @try{
         writeDataDelegate = delegate;
         toWrite = data;
+        NSLog(@"[BLE] writeValue length=%lu connected=%@", (unsigned long)[data length], connected);
         connected.delegate = instance;
         [connected discoverServices:supportServices];
 //    [connected writeValue:data forCharacteristic:[writeableCharactiscs objectForKey:supportServices[0]] type:CBCharacteristicWriteWithoutResponse];
@@ -213,6 +216,34 @@ RCT_EXPORT_METHOD(connect:(NSString *)address
         //Callbacks:
         //centralManager:didDiscoverPeripheral:advertisementData:RSSI:
     }
+}
+
+RCT_EXPORT_METHOD(writeRaw:(NSString *)data
+                  withResolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+    if(![RNBluetoothManager isConnected]){
+        reject(@"NOT_CONNECTED",@"NOT_CONNECTED",nil);
+        return;
+    }
+    if(!data || [data length] == 0){
+        reject(@"INVALID_DATA",@"INVALID_DATA",nil);
+        return;
+    }
+    NSData *payload = nil;
+    if([data hasPrefix:@"BASE64:"]){
+        NSString *base64 = [data substringFromIndex:7];
+        payload = [[NSData alloc] initWithBase64EncodedString:base64 options:0];
+    }else{
+        payload = [data dataUsingEncoding:NSUTF8StringEncoding];
+    }
+    if(!payload){
+        reject(@"ENCODING_ERROR",@"ENCODING_ERROR",nil);
+        return;
+    }
+    rawWriteResolve = resolve;
+    rawWriteReject = reject;
+    [RNBluetoothManager writeValue:payload withDelegate:self];
 }
 //unpaire(address)
 
@@ -412,8 +443,7 @@ RCT_EXPORT_METHOD(connect:(NSString *)address
  */
 - (void)peripheral:(CBPeripheral *)peripheral didDiscoverCharacteristicsForService:(CBService *)service error:(nullable NSError *)error{
     if(toWrite && connected
-       && [connected.identifier.UUIDString isEqualToString:peripheral.identifier.UUIDString]
-       && [service.UUID.UUIDString isEqualToString:supportServices[0].UUIDString]){
+       && [connected.identifier.UUIDString isEqualToString:peripheral.identifier.UUIDString]){
         if(error){
             NSLog(@"Discrover charactoreristics error:%@",error);
            if(writeDataDelegate)
@@ -421,25 +451,52 @@ RCT_EXPORT_METHOD(connect:(NSString *)address
                [writeDataDelegate didWriteDataToBle:false];
                return;
            }
+    }
+        BOOL wrote = false;
+        BOOL hasPreferred = false;
+        for(CBCharacteristic *cc in service.characteristics){
+            BOOL isPreferredService = supportServices
+              && [service.UUID.UUIDString isEqualToString:supportServices[0].UUIDString];
+            BOOL isPreferredChar = isPreferredService
+              && [cc.UUID.UUIDString isEqualToString:[writeableCharactiscs objectForKey: supportServices[0]]];
+            if (isPreferredChar) {
+                hasPreferred = true;
+            }
         }
+        NSLog(@"[BLE] service %@ hasPreferred=%@", service.UUID.UUIDString, hasPreferred ? @"YES" : @"NO");
         for(CBCharacteristic *cc in service.characteristics){
             NSLog(@"Characterstic found: %@ in service: %@" ,cc,service.UUID.UUIDString);
-            if([cc.UUID.UUIDString isEqualToString:[writeableCharactiscs objectForKey: supportServices[0]]]){
+            BOOL isPreferredService = supportServices
+              && [service.UUID.UUIDString isEqualToString:supportServices[0].UUIDString];
+            BOOL isPreferredChar = isPreferredService
+              && [cc.UUID.UUIDString isEqualToString:[writeableCharactiscs objectForKey: supportServices[0]]];
+            BOOL canWrite = (cc.properties & CBCharacteristicPropertyWrite)
+              || (cc.properties & CBCharacteristicPropertyWriteWithoutResponse);
+
+            if(isPreferredChar || (!hasPreferred && canWrite)){
                 @try{
-                    [connected writeValue:toWrite forCharacteristic:cc type:CBCharacteristicWriteWithoutResponse];
-                   if(writeDataDelegate) [writeDataDelegate didWriteDataToBle:true];
+                    CBCharacteristicWriteType writeType = (cc.properties & CBCharacteristicPropertyWriteWithoutResponse)
+                      ? CBCharacteristicWriteWithoutResponse
+                      : CBCharacteristicWriteWithResponse;
+                    NSLog(@"[BLE] writing to %@ type=%@", cc.UUID.UUIDString, writeType == CBCharacteristicWriteWithoutResponse ? @"withoutResponse" : @"withResponse");
+                    [connected writeValue:toWrite forCharacteristic:cc type:writeType];
+                    wrote = true;
                     if(toWrite){
                         NSLog(@"Value wrote: %lu",[toWrite length]);
                     }
                 }
                 @catch(NSException *e){
                     NSLog(@"ERRO IN WRITE VALUE: %@",e);
-                      [writeDataDelegate didWriteDataToBle:false];
                 }
             }
         }
-        
-        
+        NSLog(@"[BLE] write complete wrote=%@", wrote ? @"YES" : @"NO");
+        if(writeDataDelegate){
+            [writeDataDelegate didWriteDataToBle:wrote];
+        }
+        if(wrote){
+            toWrite = nil;
+        }
     }
     
     if(error){
@@ -565,6 +622,18 @@ RCT_EXPORT_METHOD(connect:(NSString *)address
     NSLog(@"Write bluetooth success.");
     if(writeDataDelegate){
         [writeDataDelegate didWriteDataToBle:true];
+    }
+}
+
+- (void) didWriteDataToBle: (BOOL)success{
+    if(rawWriteResolve || rawWriteReject){
+        if(success){
+            if(rawWriteResolve) rawWriteResolve(nil);
+        }else{
+            if(rawWriteReject) rawWriteReject(@"WRITE_FAILED",@"WRITE_FAILED",nil);
+        }
+        rawWriteResolve = nil;
+        rawWriteReject = nil;
     }
 }
  
