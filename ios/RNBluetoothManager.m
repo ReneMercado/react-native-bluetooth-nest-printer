@@ -34,6 +34,9 @@ static NSTimer *writeTimeoutTimer = nil;
 static BOOL waitingWriteResponse = NO;
 static CBCharacteristic *cachedWriteCharacteristic = nil;
 static NSString *cachedWritePeripheralId = nil;
+static NSData *pendingNoRespData = nil;
+static CBCharacteristic *pendingNoRespCharacteristic = nil;
+static BOOL waitingNoRespReady = NO;
 
 static void clearCachedWriteCharacteristic(void) {
     cachedWriteCharacteristic = nil;
@@ -42,6 +45,9 @@ static void clearCachedWriteCharacteristic(void) {
 
 static void resetWriteState(void) {
     waitingWriteResponse = NO;
+    waitingNoRespReady = NO;
+    pendingNoRespData = nil;
+    pendingNoRespCharacteristic = nil;
     if (pendingWriteServices) {
         [pendingWriteServices removeAllObjects];
     }
@@ -98,6 +104,14 @@ static void resetWriteState(void) {
                     NSLog(@"[BLE] cached write to %@ type=%@",
                           cachedWriteCharacteristic.UUID.UUIDString,
                           writeType == CBCharacteristicWriteWithoutResponse ? @"withoutResponse" : @"withResponse");
+                    if (writeType == CBCharacteristicWriteWithoutResponse && !connected.canSendWriteWithoutResponse) {
+                        NSLog(@"[BLE] cached write delayed (canSendWriteWithoutResponse=NO)");
+                        pendingNoRespData = toWrite;
+                        pendingNoRespCharacteristic = cachedWriteCharacteristic;
+                        waitingNoRespReady = YES;
+                        toWrite = nil;
+                        return;
+                    }
                     [connected writeValue:toWrite forCharacteristic:cachedWriteCharacteristic type:writeType];
                     toWrite = nil;
                     if (!waitingWriteResponse && writeDataDelegate) {
@@ -133,7 +147,7 @@ static void resetWriteState(void) {
         resetWriteState();
         return;
     }
-    if(toWrite || waitingWriteResponse){
+    if(toWrite || waitingWriteResponse || waitingNoRespReady || pendingNoRespData){
         NSLog(@"[BLE] write timeout (no characteristic found or no response)");
         [writeDataDelegate didWriteDataToBle:false];
     }
@@ -630,9 +644,17 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
                   : CBCharacteristicWriteWithResponse;
                 waitingWriteResponse = (writeType == CBCharacteristicWriteWithResponse);
                 NSLog(@"[BLE] writing to %@ type=%@", target.UUID.UUIDString, writeType == CBCharacteristicWriteWithoutResponse ? @"withoutResponse" : @"withResponse");
-                [connected writeValue:toWrite forCharacteristic:target type:writeType];
-                wrote = true;
-                NSLog(@"Value wrote: %lu",(unsigned long)[toWrite length]);
+                if (writeType == CBCharacteristicWriteWithoutResponse && !connected.canSendWriteWithoutResponse) {
+                    NSLog(@"[BLE] write delayed (canSendWriteWithoutResponse=NO)");
+                    pendingNoRespData = toWrite;
+                    pendingNoRespCharacteristic = target;
+                    waitingNoRespReady = YES;
+                    wrote = true;
+                } else {
+                    [connected writeValue:toWrite forCharacteristic:target type:writeType];
+                    wrote = true;
+                    NSLog(@"Value wrote: %lu",(unsigned long)[toWrite length]);
+                }
             }
             @catch(NSException *e){
                 NSLog(@"ERRO IN WRITE VALUE: %@",e);
@@ -646,7 +668,7 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
             if(pendingWriteServices){
                 [pendingWriteServices removeAllObjects];
             }
-            if(!waitingWriteResponse && writeDataDelegate){
+            if(!waitingWriteResponse && !waitingNoRespReady && writeDataDelegate){
                 // No callback for WriteWithoutResponse; treat as success once the write request is accepted.
                 [writeDataDelegate didWriteDataToBle:true];
                 resetWriteState();
@@ -791,6 +813,38 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
     }
     resetWriteState();
     waitingWriteResponse = NO;
+}
+
+- (void)peripheralIsReadyToSendWriteWithoutResponse:(CBPeripheral *)peripheral {
+    if (!pendingNoRespData || !pendingNoRespCharacteristic) {
+        return;
+    }
+    if (!connected || !peripheral || !connected.identifier || !peripheral.identifier) {
+        return;
+    }
+    if (![connected.identifier.UUIDString isEqualToString:peripheral.identifier.UUIDString]) {
+        return;
+    }
+    if (!connected.canSendWriteWithoutResponse) {
+        return;
+    }
+    @try {
+        NSLog(@"[BLE] flushing delayed write without response");
+        [connected writeValue:pendingNoRespData forCharacteristic:pendingNoRespCharacteristic type:CBCharacteristicWriteWithoutResponse];
+        pendingNoRespData = nil;
+        pendingNoRespCharacteristic = nil;
+        waitingNoRespReady = NO;
+        if (writeDataDelegate) {
+            [writeDataDelegate didWriteDataToBle:true];
+        }
+        resetWriteState();
+    } @catch (NSException *e) {
+        NSLog(@"[BLE] delayed write failed: %@", e);
+        if (writeDataDelegate) {
+            [writeDataDelegate didWriteDataToBle:false];
+        }
+        resetWriteState();
+    }
 }
 
 - (void) didWriteDataToBle: (BOOL)success{
