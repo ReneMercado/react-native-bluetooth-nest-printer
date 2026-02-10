@@ -32,6 +32,13 @@ static RCTPromiseRejectBlock rawWriteReject;
 static NSMutableSet<NSString *> *pendingWriteServices = nil;
 static NSTimer *writeTimeoutTimer = nil;
 static BOOL waitingWriteResponse = NO;
+static CBCharacteristic *cachedWriteCharacteristic = nil;
+static NSString *cachedWritePeripheralId = nil;
+
+static void clearCachedWriteCharacteristic(void) {
+    cachedWriteCharacteristic = nil;
+    cachedWritePeripheralId = nil;
+}
 
 static void resetWriteState(void) {
     waitingWriteResponse = NO;
@@ -64,15 +71,11 @@ static void resetWriteState(void) {
             return;
         }
 
-        // Reset per-write discovery state and start a timeout to avoid hanging Promises.
+        // Reset per-write state and start a timeout to avoid hanging Promises.
+        connected.delegate = instance;
+        resetWriteState();
         if (!pendingWriteServices) {
             pendingWriteServices = [[NSMutableSet alloc] init];
-        } else {
-            [pendingWriteServices removeAllObjects];
-        }
-        resetWriteState();
-        if (writeTimeoutTimer && writeTimeoutTimer.isValid) {
-            [writeTimeoutTimer invalidate];
         }
         // 15s is enough for service discovery and a single write request. Long transfers should chunk.
         writeTimeoutTimer = [NSTimer scheduledTimerWithTimeInterval:15
@@ -81,8 +84,39 @@ static void resetWriteState(void) {
                                                           userInfo:nil
                                                            repeats:NO];
 
-        connected.delegate = instance;
-        // Discover all services. Some peripherals don't expose the hard-coded ISSC service UUID.
+        // Fast path: write directly to a cached writable characteristic for this peripheral.
+        if (cachedWriteCharacteristic && cachedWritePeripheralId && connected.identifier
+            && [cachedWritePeripheralId isEqualToString:connected.identifier.UUIDString]) {
+            BOOL canWrite = (cachedWriteCharacteristic.properties & CBCharacteristicPropertyWrite)
+              || (cachedWriteCharacteristic.properties & CBCharacteristicPropertyWriteWithoutResponse);
+            if (canWrite) {
+                @try {
+                    CBCharacteristicWriteType writeType = (cachedWriteCharacteristic.properties & CBCharacteristicPropertyWriteWithoutResponse)
+                      ? CBCharacteristicWriteWithoutResponse
+                      : CBCharacteristicWriteWithResponse;
+                    waitingWriteResponse = (writeType == CBCharacteristicWriteWithResponse);
+                    NSLog(@"[BLE] cached write to %@ type=%@",
+                          cachedWriteCharacteristic.UUID.UUIDString,
+                          writeType == CBCharacteristicWriteWithoutResponse ? @"withoutResponse" : @"withResponse");
+                    [connected writeValue:toWrite forCharacteristic:cachedWriteCharacteristic type:writeType];
+                    toWrite = nil;
+                    if (!waitingWriteResponse && writeDataDelegate) {
+                        // No callback for WriteWithoutResponse; treat as success once the write request is accepted.
+                        [writeDataDelegate didWriteDataToBle:true];
+                        resetWriteState();
+                    }
+                    return;
+                } @catch (NSException *e) {
+                    NSLog(@"[BLE] cached write failed: %@", e);
+                    clearCachedWriteCharacteristic();
+                    // Fall through to discovery.
+                }
+            } else {
+                clearCachedWriteCharacteristic();
+            }
+        }
+
+        // Slow path: discover all services. Some peripherals don't expose the hard-coded ISSC service UUID.
         [connected discoverServices:nil];
 //    [connected writeValue:data forCharacteristic:[writeableCharactiscs objectForKey:supportServices[0]] type:CBCharacteristicWriteWithoutResponse];
     }
@@ -414,6 +448,12 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
 }
 
 - (void)centralManager:(CBCentralManager *)central didDisconnectPeripheral:(CBPeripheral *)peripheral error:(nullable NSError *)error{
+    clearCachedWriteCharacteristic();
+    if(writeDataDelegate && (toWrite || waitingWriteResponse || rawWriteResolve || rawWriteReject)){
+        [writeDataDelegate didWriteDataToBle:false];
+        toWrite = nil;
+        resetWriteState();
+    }
     if(!connected && _waitingConnect && [_waitingConnect isEqualToString:peripheral.identifier.UUIDString]){
         if(self.connectRejectBlock){
             RCTPromiseRejectBlock rjBlock = self.connectRejectBlock;
@@ -580,6 +620,10 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
               targetIsPreferred ? @"YES" : @"NO");
 
         if(target){
+            if(peripheral && peripheral.identifier && peripheral.identifier.UUIDString){
+                cachedWriteCharacteristic = target;
+                cachedWritePeripheralId = peripheral.identifier.UUIDString;
+            }
             @try{
                 CBCharacteristicWriteType writeType = (target.properties & CBCharacteristicPropertyWriteWithoutResponse)
                   ? CBCharacteristicWriteWithoutResponse
