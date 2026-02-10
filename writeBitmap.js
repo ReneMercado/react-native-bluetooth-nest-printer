@@ -1,6 +1,6 @@
 "use strict";
 
-const { NativeModules } = require("react-native");
+const { NativeModules, Platform } = require("react-native");
 const { BluetoothManager } = NativeModules;
 
 const BASE64_PREFIX = "BASE64:";
@@ -58,6 +58,10 @@ function bytesToBase64(bytes) {
     output += "=";
   }
   return output;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function normalizeBitmapText(value) {
@@ -289,7 +293,7 @@ function decodeBase64ToBytes(base64) {
  * @param {number} [options.logoHeightDots] - Logo height in dots
  * @returns {Promise<void>}
  */
-function writeBitmap(options) {
+async function writeBitmap(options) {
   const {
     code = "CODE",
     lines = [],
@@ -503,7 +507,20 @@ function writeBitmap(options) {
   );
   const payload = BASE64_PREFIX + bytesToBase64(payloadBytes);
 
-  return BluetoothManager.writeRaw(payload);
+  // iOS BLE writes can hang or fail for large payloads if sent as one chunk.
+  // Chunking keeps each write within typical BLE limits and provides basic pacing.
+  if (Platform.OS !== "ios" || payloadBytes.length <= 512) {
+    return BluetoothManager.writeRaw(payload);
+  }
+
+  const chunkSize = 180; // conservative (ATT MTU is often 185 for iOS)
+  const delayMs = 20;
+  for (let offset = 0; offset < payloadBytes.length; offset += chunkSize) {
+    const chunk = payloadBytes.subarray(offset, offset + chunkSize);
+    const chunkPayload = BASE64_PREFIX + bytesToBase64(chunk);
+    await BluetoothManager.writeRaw(chunkPayload);
+    if (delayMs) await sleep(delayMs);
+  }
 }
 
 module.exports = { writeBitmap };
