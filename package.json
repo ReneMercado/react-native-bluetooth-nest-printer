@@ -23,11 +23,9 @@
   ],
   "author": "baochau9xx (modified by ReneMercado)",
   "license": "MIT",
-  "dependencies": {
-    "qrcode": "^1.5.4"
-  },
   "peerDependencies": {
-    "react-native": ">=0.55.4"
+    "react-native": ">=0.55.4",
+    "qrcode": "^1.5.4"
   },
   "repository": {
     "type": "git",
