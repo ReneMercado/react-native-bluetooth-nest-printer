@@ -513,8 +513,8 @@ async function writeBitmap(options) {
     return BluetoothManager.writeRaw(payload);
   }
 
-  const chunkSize = 180; // conservative (ATT MTU is often 185 for iOS)
-  const delayMs = 20;
+  const chunkSize = 120; // more conservative to avoid iOS BLE buffer pressure
+  const delayMs = 40;
   for (let offset = 0; offset < payloadBytes.length; offset += chunkSize) {
     const chunk = payloadBytes.subarray(offset, offset + chunkSize);
     const chunkPayload = BASE64_PREFIX + bytesToBase64(chunk);
