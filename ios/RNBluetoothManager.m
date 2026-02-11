@@ -97,9 +97,9 @@ static void resetWriteState(void) {
               || (cachedWriteCharacteristic.properties & CBCharacteristicPropertyWriteWithoutResponse);
             if (canWrite) {
                 @try {
-                    CBCharacteristicWriteType writeType = (cachedWriteCharacteristic.properties & CBCharacteristicPropertyWriteWithoutResponse)
-                      ? CBCharacteristicWriteWithoutResponse
-                      : CBCharacteristicWriteWithResponse;
+                    CBCharacteristicWriteType writeType = (cachedWriteCharacteristic.properties & CBCharacteristicPropertyWrite)
+                      ? CBCharacteristicWriteWithResponse
+                      : CBCharacteristicWriteWithoutResponse;
                     waitingWriteResponse = (writeType == CBCharacteristicWriteWithResponse);
                     NSLog(@"[BLE] cached write to %@ type=%@",
                           cachedWriteCharacteristic.UUID.UUIDString,
@@ -639,9 +639,9 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
                 cachedWritePeripheralId = peripheral.identifier.UUIDString;
             }
             @try{
-                CBCharacteristicWriteType writeType = (target.properties & CBCharacteristicPropertyWriteWithoutResponse)
-                  ? CBCharacteristicWriteWithoutResponse
-                  : CBCharacteristicWriteWithResponse;
+                CBCharacteristicWriteType writeType = (target.properties & CBCharacteristicPropertyWrite)
+                  ? CBCharacteristicWriteWithResponse
+                  : CBCharacteristicWriteWithoutResponse;
                 waitingWriteResponse = (writeType == CBCharacteristicWriteWithResponse);
                 NSLog(@"[BLE] writing to %@ type=%@", target.UUID.UUIDString, writeType == CBCharacteristicWriteWithoutResponse ? @"withoutResponse" : @"withResponse");
                 if (writeType == CBCharacteristicWriteWithoutResponse && !connected.canSendWriteWithoutResponse) {
