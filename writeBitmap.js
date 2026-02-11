@@ -509,12 +509,13 @@ async function writeBitmap(options) {
 
   // iOS BLE writes can hang or fail for large payloads if sent as one chunk.
   // Chunking keeps each write within typical BLE limits and provides basic pacing.
-  if (Platform.OS !== "ios" || payloadBytes.length <= 512) {
+  const iosChunkSize = 20; // MTU 23 -> 20 bytes payload is safest across devices
+  if (Platform.OS !== "ios" || payloadBytes.length <= iosChunkSize) {
     return BluetoothManager.writeRaw(payload);
   }
 
-  const chunkSize = 120; // more conservative to avoid iOS BLE buffer pressure
-  const delayMs = 40;
+  const chunkSize = iosChunkSize;
+  const delayMs = 80;
   for (let offset = 0; offset < payloadBytes.length; offset += chunkSize) {
     const chunk = payloadBytes.subarray(offset, offset + chunkSize);
     const chunkPayload = BASE64_PREFIX + bytesToBase64(chunk);
