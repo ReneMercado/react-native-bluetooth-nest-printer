@@ -43,6 +43,59 @@ static BOOL waitingNoRespReady = NO;
 static NSTimeInterval pendingNoRespDelay = 0.05;
 static NSTimeInterval pendingRespDelay = 0.05;
 
+static BOOL hasWriteWithResponse(CBCharacteristic *characteristic) {
+    return characteristic && ((characteristic.properties & CBCharacteristicPropertyWrite) != 0);
+}
+
+static BOOL hasWriteWithoutResponse(CBCharacteristic *characteristic) {
+    return characteristic && ((characteristic.properties & CBCharacteristicPropertyWriteWithoutResponse) != 0);
+}
+
+static BOOL preferWriteWithoutResponse(CBCharacteristic *characteristic, NSUInteger payloadLength) {
+    if (!characteristic) {
+        return NO;
+    }
+    BOOL supportsWithResponse = hasWriteWithResponse(characteristic);
+    BOOL supportsWithoutResponse = hasWriteWithoutResponse(characteristic);
+    if (!supportsWithoutResponse) {
+        return NO;
+    }
+    if (!supportsWithResponse) {
+        return YES;
+    }
+    NSString *uuid = characteristic.UUID ? [characteristic.UUID.UUIDString uppercaseString] : @"";
+    BOOL likelyPrinterStream = [uuid hasSuffix:@"FF02"] || [uuid hasSuffix:@"2AF1"] || [uuid hasSuffix:@"FFE1"];
+    return likelyPrinterStream || payloadLength > 4096;
+}
+
+static CBCharacteristicWriteType preferredWriteType(CBCharacteristic *characteristic, NSUInteger payloadLength) {
+    if (preferWriteWithoutResponse(characteristic, payloadLength)) {
+        return CBCharacteristicWriteWithoutResponse;
+    }
+    if (hasWriteWithResponse(characteristic)) {
+        return CBCharacteristicWriteWithResponse;
+    }
+    return CBCharacteristicWriteWithoutResponse;
+}
+
+static NSUInteger preferredChunkSize(CBPeripheral *peripheral, CBCharacteristicWriteType writeType, NSUInteger payloadLength) {
+    NSUInteger maxLen = [peripheral maximumWriteValueLengthForType:writeType];
+    if (maxLen == 0) {
+        maxLen = 20;
+    }
+    NSUInteger cap = 20;
+    if (writeType == CBCharacteristicWriteWithResponse) {
+        cap = payloadLength > 4096 ? 64 : 120;
+    } else {
+        cap = payloadLength > 65536 ? 120 : 180;
+    }
+    NSUInteger chosen = MIN(maxLen, cap);
+    if (chosen == 0) {
+        chosen = 20;
+    }
+    return chosen;
+}
+
 static void clearCachedWriteCharacteristic(void) {
     cachedWriteCharacteristic = nil;
     cachedWritePeripheralId = nil;
@@ -177,23 +230,15 @@ static void resetWriteState(void) {
               || (cachedWriteCharacteristic.properties & CBCharacteristicPropertyWriteWithoutResponse);
             if (canWrite) {
                 @try {
-                    CBCharacteristicWriteType writeType = (cachedWriteCharacteristic.properties & CBCharacteristicPropertyWrite)
-                      ? CBCharacteristicWriteWithResponse
-                      : CBCharacteristicWriteWithoutResponse;
+                    NSUInteger payloadLength = [toWrite length];
+                    CBCharacteristicWriteType writeType = preferredWriteType(cachedWriteCharacteristic, payloadLength);
                     waitingWriteResponse = (writeType == CBCharacteristicWriteWithResponse);
-                    NSLog(@"[BLE] cached write to %@ type=%@",
+                    NSLog(@"[BLE] cached write to %@ type=%@ payload=%lu",
                           cachedWriteCharacteristic.UUID.UUIDString,
-                          writeType == CBCharacteristicWriteWithoutResponse ? @"withoutResponse" : @"withResponse");
-                    NSUInteger maxLen = [connected maximumWriteValueLengthForType:writeType];
-                    if (maxLen == 0) {
-                        maxLen = 20;
-                    }
-                    NSUInteger cappedLen = maxLen;
-                    if (writeType == CBCharacteristicWriteWithResponse) {
-                        cappedLen = MIN(maxLen, 120);
-                    } else {
-                        cappedLen = MIN(maxLen, 180);
-                    }
+                          writeType == CBCharacteristicWriteWithoutResponse ? @"withoutResponse" : @"withResponse",
+                          (unsigned long)payloadLength);
+                    NSUInteger cappedLen = preferredChunkSize(connected, writeType, payloadLength);
+                    NSLog(@"[BLE] cached chunkSize=%lu", (unsigned long)cappedLen);
                     pendingWritePayload = toWrite;
                     pendingWriteOffset = 0;
                     pendingWriteChunkSize = cappedLen;
@@ -723,21 +768,12 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
                 cachedWritePeripheralId = peripheral.identifier.UUIDString;
             }
             @try{
-                CBCharacteristicWriteType writeType = (target.properties & CBCharacteristicPropertyWrite)
-                  ? CBCharacteristicWriteWithResponse
-                  : CBCharacteristicWriteWithoutResponse;
+                NSUInteger payloadLength = [toWrite length];
+                CBCharacteristicWriteType writeType = preferredWriteType(target, payloadLength);
                 waitingWriteResponse = (writeType == CBCharacteristicWriteWithResponse);
-                NSLog(@"[BLE] writing to %@ type=%@", target.UUID.UUIDString, writeType == CBCharacteristicWriteWithoutResponse ? @"withoutResponse" : @"withResponse");
-                NSUInteger maxLen = [connected maximumWriteValueLengthForType:writeType];
-                if (maxLen == 0) {
-                    maxLen = 20;
-                }
-                NSUInteger cappedLen = maxLen;
-                if (writeType == CBCharacteristicWriteWithResponse) {
-                    cappedLen = MIN(maxLen, 120);
-                } else {
-                    cappedLen = MIN(maxLen, 180);
-                }
+                NSLog(@"[BLE] writing to %@ type=%@ payload=%lu", target.UUID.UUIDString, writeType == CBCharacteristicWriteWithoutResponse ? @"withoutResponse" : @"withResponse", (unsigned long)payloadLength);
+                NSUInteger cappedLen = preferredChunkSize(connected, writeType, payloadLength);
+                NSLog(@"[BLE] chunkSize=%lu", (unsigned long)cappedLen);
                 pendingWritePayload = toWrite;
                 pendingWriteOffset = 0;
                 pendingWriteChunkSize = cappedLen;
