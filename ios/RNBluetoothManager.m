@@ -42,6 +42,9 @@ static CBCharacteristic *pendingWriteCharacteristic = nil;
 static BOOL waitingNoRespReady = NO;
 static NSTimeInterval pendingNoRespDelay = 0.05;
 static NSTimeInterval pendingRespDelay = 0.05;
+static NSString *pendingConnectAddress = nil;
+static NSUInteger pendingConnectRetryCount = 0;
+static const NSUInteger maxConnectRetries = 1;
 
 static BOOL hasWriteWithResponse(CBCharacteristic *characteristic) {
     return characteristic && ((characteristic.properties & CBCharacteristicPropertyWrite) != 0);
@@ -63,9 +66,13 @@ static BOOL preferWriteWithoutResponse(CBCharacteristic *characteristic, NSUInte
     if (!supportsWithResponse) {
         return YES;
     }
+    // Small/medium payloads are more reliable with response on iOS.
+    if (payloadLength <= 12000) {
+        return NO;
+    }
     NSString *uuid = characteristic.UUID ? [characteristic.UUID.UUIDString uppercaseString] : @"";
     BOOL likelyPrinterStream = [uuid hasSuffix:@"FF02"] || [uuid hasSuffix:@"2AF1"] || [uuid hasSuffix:@"FFE1"];
-    return likelyPrinterStream || payloadLength > 4096;
+    return likelyPrinterStream || payloadLength > 12000;
 }
 
 static CBCharacteristicWriteType preferredWriteType(CBCharacteristic *characteristic, NSUInteger payloadLength) {
@@ -85,7 +92,7 @@ static NSUInteger preferredChunkSize(CBPeripheral *peripheral, CBCharacteristicW
     }
     NSUInteger cap = 20;
     if (writeType == CBCharacteristicWriteWithResponse) {
-        cap = payloadLength > 4096 ? 64 : 120;
+        cap = payloadLength > 12000 ? 48 : 96;
     } else {
         cap = payloadLength > 65536 ? 120 : 180;
     }
@@ -94,6 +101,20 @@ static NSUInteger preferredChunkSize(CBPeripheral *peripheral, CBCharacteristicW
         chosen = 20;
     }
     return chosen;
+}
+
+static BOOL shouldRetryConnectForError(NSError *error) {
+    if (!error) {
+        return NO;
+    }
+    if (error.domain && ![error.domain isEqualToString:@"CBErrorDomain"]) {
+        return NO;
+    }
+    NSString *msg = [[error localizedDescription] lowercaseString];
+    if (!msg) {
+        return NO;
+    }
+    return [msg containsString:@"encrypt"] || [msg containsString:@"timed out"] || [msg containsString:@"timeout"];
 }
 
 static void clearCachedWriteCharacteristic(void) {
@@ -422,6 +443,8 @@ RCT_EXPORT_METHOD(connect:(NSString *)address
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
     NSLog(@"Trying to connect....%@",address);
+    pendingConnectAddress = address;
+    pendingConnectRetryCount = 0;
     [self callStop];
     if(connected){
         NSString *connectedAddress =connected.identifier.UUIDString;
@@ -574,6 +597,8 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
 - (void)centralManager:(CBCentralManager *)central didConnectPeripheral:(CBPeripheral *)peripheral{
     NSLog(@"did connected: %@",peripheral);
     connected = peripheral;
+    pendingConnectAddress = nil;
+    pendingConnectRetryCount = 0;
     NSString *pId = peripheral.identifier.UUIDString;
     if(_waitingConnect && [_waitingConnect isEqualToString: pId] && self.connectResolveBlock){
         NSLog(@"Predefined the support services, stop to looking up services.");
@@ -618,6 +643,25 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
 }
 
 - (void)centralManager:(CBCentralManager *)central didFailToConnectPeripheral:(CBPeripheral *)peripheral error:(nullable NSError *)error{
+    BOOL canRetry = NO;
+    NSString *peripheralId = peripheral.identifier.UUIDString;
+    if (pendingConnectAddress && peripheralId && [pendingConnectAddress isEqualToString:peripheralId]) {
+        canRetry = shouldRetryConnectForError(error) && (pendingConnectRetryCount < maxConnectRetries);
+    }
+    if (canRetry) {
+        pendingConnectRetryCount += 1;
+        NSLog(@"[BLE] retrying connect (%lu/%lu) for %@ due to error: %@",
+              (unsigned long)pendingConnectRetryCount,
+              (unsigned long)maxConnectRetries,
+              peripheralId,
+              error.localizedDescription);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self.centralManager connectPeripheral:peripheral options:nil];
+        });
+        return;
+    }
+    pendingConnectAddress = nil;
+    pendingConnectRetryCount = 0;
     if(self.connectRejectBlock){
         RCTPromiseRejectBlock rjBlock = self.connectRejectBlock;
         rjBlock(@"",@"",error);
