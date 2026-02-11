@@ -28,6 +28,168 @@ static NSTimer *timer;
 static RCTPromiseResolveBlock rawWriteResolve;
 static RCTPromiseRejectBlock rawWriteReject;
 
+// Track async service/characteristic discovery for a single pending write.
+static NSMutableSet<NSString *> *pendingWriteServices = nil;
+static NSTimer *writeTimeoutTimer = nil;
+static BOOL waitingWriteResponse = NO;
+static CBCharacteristic *cachedWriteCharacteristic = nil;
+static NSString *cachedWritePeripheralId = nil;
+static NSData *pendingWritePayload = nil;
+static NSUInteger pendingWriteOffset = 0;
+static NSUInteger pendingWriteChunkSize = 0;
+static CBCharacteristicWriteType pendingWriteType = CBCharacteristicWriteWithoutResponse;
+static CBCharacteristic *pendingWriteCharacteristic = nil;
+static BOOL waitingNoRespReady = NO;
+static NSTimeInterval pendingNoRespDelay = 0.05;
+static NSTimeInterval pendingRespDelay = 0.05;
+
+static BOOL hasWriteWithResponse(CBCharacteristic *characteristic) {
+    return characteristic && ((characteristic.properties & CBCharacteristicPropertyWrite) != 0);
+}
+
+static BOOL hasWriteWithoutResponse(CBCharacteristic *characteristic) {
+    return characteristic && ((characteristic.properties & CBCharacteristicPropertyWriteWithoutResponse) != 0);
+}
+
+static BOOL preferWriteWithoutResponse(CBCharacteristic *characteristic, NSUInteger payloadLength) {
+    if (!characteristic) {
+        return NO;
+    }
+    BOOL supportsWithResponse = hasWriteWithResponse(characteristic);
+    BOOL supportsWithoutResponse = hasWriteWithoutResponse(characteristic);
+    if (!supportsWithoutResponse) {
+        return NO;
+    }
+    if (!supportsWithResponse) {
+        return YES;
+    }
+    NSString *uuid = characteristic.UUID ? [characteristic.UUID.UUIDString uppercaseString] : @"";
+    BOOL likelyPrinterStream = [uuid hasSuffix:@"FF02"] || [uuid hasSuffix:@"2AF1"] || [uuid hasSuffix:@"FFE1"];
+    return likelyPrinterStream || payloadLength > 4096;
+}
+
+static CBCharacteristicWriteType preferredWriteType(CBCharacteristic *characteristic, NSUInteger payloadLength) {
+    if (preferWriteWithoutResponse(characteristic, payloadLength)) {
+        return CBCharacteristicWriteWithoutResponse;
+    }
+    if (hasWriteWithResponse(characteristic)) {
+        return CBCharacteristicWriteWithResponse;
+    }
+    return CBCharacteristicWriteWithoutResponse;
+}
+
+static NSUInteger preferredChunkSize(CBPeripheral *peripheral, CBCharacteristicWriteType writeType, NSUInteger payloadLength) {
+    NSUInteger maxLen = [peripheral maximumWriteValueLengthForType:writeType];
+    if (maxLen == 0) {
+        maxLen = 20;
+    }
+    NSUInteger cap = 20;
+    if (writeType == CBCharacteristicWriteWithResponse) {
+        cap = payloadLength > 4096 ? 64 : 120;
+    } else {
+        cap = payloadLength > 65536 ? 120 : 180;
+    }
+    NSUInteger chosen = MIN(maxLen, cap);
+    if (chosen == 0) {
+        chosen = 20;
+    }
+    return chosen;
+}
+
+static void clearCachedWriteCharacteristic(void) {
+    cachedWriteCharacteristic = nil;
+    cachedWritePeripheralId = nil;
+}
+
+static void clearPendingWrite(void) {
+    pendingWritePayload = nil;
+    pendingWriteOffset = 0;
+    pendingWriteChunkSize = 0;
+    pendingWriteCharacteristic = nil;
+    pendingWriteType = CBCharacteristicWriteWithoutResponse;
+}
+
+static void resetWriteState(void) {
+    waitingWriteResponse = NO;
+    waitingNoRespReady = NO;
+    clearPendingWrite();
+    if (pendingWriteServices) {
+        [pendingWriteServices removeAllObjects];
+    }
+    if (writeTimeoutTimer && writeTimeoutTimer.isValid) {
+        [writeTimeoutTimer invalidate];
+    }
+    writeTimeoutTimer = nil;
+}
+
++(void)restartWriteTimeout:(NSTimeInterval)timeoutSec {
+    if (writeTimeoutTimer && writeTimeoutTimer.isValid) {
+        [writeTimeoutTimer invalidate];
+    }
+    if (!instance) {
+        writeTimeoutTimer = nil;
+        return;
+    }
+    writeTimeoutTimer = [NSTimer scheduledTimerWithTimeInterval:timeoutSec
+                                                        target:instance
+                                                      selector:@selector(onBleWriteTimeout)
+                                                      userInfo:nil
+                                                       repeats:NO];
+}
+
++(void)sendNextPendingChunk {
+    if (!pendingWritePayload || !pendingWriteCharacteristic || !connected) {
+        return;
+    }
+    if (pendingWriteOffset >= [pendingWritePayload length]) {
+        if (writeDataDelegate) {
+            [writeDataDelegate didWriteDataToBle:true];
+        }
+        toWrite = nil;
+        resetWriteState();
+        return;
+    }
+
+    if (pendingWriteType == CBCharacteristicWriteWithoutResponse && !connected.canSendWriteWithoutResponse) {
+        waitingNoRespReady = YES;
+        return;
+    }
+
+    NSUInteger remaining = [pendingWritePayload length] - pendingWriteOffset;
+    NSUInteger chunkSize = pendingWriteChunkSize > 0 ? pendingWriteChunkSize : remaining;
+    if (chunkSize > remaining) {
+        chunkSize = remaining;
+    }
+    NSData *chunk = [pendingWritePayload subdataWithRange:NSMakeRange(pendingWriteOffset, chunkSize)];
+    pendingWriteOffset += chunkSize;
+
+    @try {
+        [connected writeValue:chunk forCharacteristic:pendingWriteCharacteristic type:pendingWriteType];
+    } @catch (NSException *e) {
+        NSLog(@"[BLE] chunk write failed: %@", e);
+        if (writeDataDelegate) {
+            [writeDataDelegate didWriteDataToBle:false];
+        }
+        toWrite = nil;
+        resetWriteState();
+        return;
+    }
+
+    if (pendingWriteType == CBCharacteristicWriteWithoutResponse) {
+        if (pendingWriteOffset >= [pendingWritePayload length]) {
+            if (writeDataDelegate) {
+                [writeDataDelegate didWriteDataToBle:true];
+            }
+            toWrite = nil;
+            resetWriteState();
+            return;
+        }
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(pendingNoRespDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [RNBluetoothManager sendNextPendingChunk];
+        });
+    }
+}
+
 +(Boolean)isConnected{
     return !(connected==nil);
 }
@@ -38,14 +200,88 @@ static RCTPromiseRejectBlock rawWriteReject;
         writeDataDelegate = delegate;
         toWrite = data;
         NSLog(@"[BLE] writeValue length=%lu connected=%@", (unsigned long)[data length], connected);
+        if(!connected || !instance){
+            NSLog(@"[BLE] writeValue aborted (no connected peripheral)");
+            if(writeDataDelegate){
+                [writeDataDelegate didWriteDataToBle:false];
+            }
+            toWrite = nil;
+            resetWriteState();
+            return;
+        }
+
+        // Reset per-write state and start a timeout to avoid hanging Promises.
         connected.delegate = instance;
-        [connected discoverServices:supportServices];
+        resetWriteState();
+        if (!pendingWriteServices) {
+            pendingWriteServices = [[NSMutableSet alloc] init];
+        }
+        // 15s is enough for service discovery and a single write request. Long transfers should chunk.
+        writeTimeoutTimer = [NSTimer scheduledTimerWithTimeInterval:15
+                                                            target:instance
+                                                          selector:@selector(onBleWriteTimeout)
+                                                          userInfo:nil
+                                                           repeats:NO];
+
+        // Fast path: write directly to a cached writable characteristic for this peripheral.
+        if (cachedWriteCharacteristic && cachedWritePeripheralId && connected.identifier
+            && [cachedWritePeripheralId isEqualToString:connected.identifier.UUIDString]) {
+            BOOL canWrite = (cachedWriteCharacteristic.properties & CBCharacteristicPropertyWrite)
+              || (cachedWriteCharacteristic.properties & CBCharacteristicPropertyWriteWithoutResponse);
+            if (canWrite) {
+                @try {
+                    NSUInteger payloadLength = [toWrite length];
+                    CBCharacteristicWriteType writeType = preferredWriteType(cachedWriteCharacteristic, payloadLength);
+                    waitingWriteResponse = (writeType == CBCharacteristicWriteWithResponse);
+                    NSLog(@"[BLE] cached write to %@ type=%@ payload=%lu",
+                          cachedWriteCharacteristic.UUID.UUIDString,
+                          writeType == CBCharacteristicWriteWithoutResponse ? @"withoutResponse" : @"withResponse",
+                          (unsigned long)payloadLength);
+                    NSUInteger cappedLen = preferredChunkSize(connected, writeType, payloadLength);
+                    NSLog(@"[BLE] cached chunkSize=%lu", (unsigned long)cappedLen);
+                    pendingWritePayload = toWrite;
+                    pendingWriteOffset = 0;
+                    pendingWriteChunkSize = cappedLen;
+                    pendingWriteCharacteristic = cachedWriteCharacteristic;
+                    pendingWriteType = writeType;
+                    NSUInteger chunkCount = ([pendingWritePayload length] + pendingWriteChunkSize - 1) / pendingWriteChunkSize;
+                    NSTimeInterval timeoutSec = MAX(15.0, (double)chunkCount * 0.1 + 5.0);
+                    [RNBluetoothManager restartWriteTimeout:timeoutSec];
+                    [RNBluetoothManager sendNextPendingChunk];
+                    return;
+                } @catch (NSException *e) {
+                    NSLog(@"[BLE] cached write failed: %@", e);
+                    clearCachedWriteCharacteristic();
+                    // Fall through to discovery.
+                }
+            } else {
+                clearCachedWriteCharacteristic();
+            }
+        }
+
+        // Slow path: discover all services. Some peripherals don't expose the hard-coded ISSC service UUID.
+        [connected discoverServices:nil];
 //    [connected writeValue:data forCharacteristic:[writeableCharactiscs objectForKey:supportServices[0]] type:CBCharacteristicWriteWithoutResponse];
     }
     @catch(NSException *e){
         NSLog(@"error in writing data to %@,issue:%@",connected,e);
         [writeDataDelegate didWriteDataToBle:false];
+        toWrite = nil;
+        resetWriteState();
     }
+}
+
+-(void)onBleWriteTimeout{
+    if(!writeDataDelegate){
+        resetWriteState();
+        return;
+    }
+    if(toWrite || pendingWritePayload || waitingWriteResponse || waitingNoRespReady){
+        NSLog(@"[BLE] write timeout (no characteristic found or no response)");
+        [writeDataDelegate didWriteDataToBle:false];
+    }
+    toWrite = nil;
+    resetWriteState();
 }
 
 // Will be called when this module's first listener is added.
@@ -355,6 +591,12 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
 }
 
 - (void)centralManager:(CBCentralManager *)central didDisconnectPeripheral:(CBPeripheral *)peripheral error:(nullable NSError *)error{
+    clearCachedWriteCharacteristic();
+    if(writeDataDelegate && (toWrite || pendingWritePayload || waitingWriteResponse || waitingNoRespReady || rawWriteResolve || rawWriteReject)){
+        [writeDataDelegate didWriteDataToBle:false];
+        toWrite = nil;
+        resetWriteState();
+    }
     if(!connected && _waitingConnect && [_waitingConnect isEqualToString:peripheral.identifier.UUIDString]){
         if(self.connectRejectBlock){
             RCTPromiseRejectBlock rjBlock = self.connectRejectBlock;
@@ -406,12 +648,43 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
 - (void)peripheral:(CBPeripheral *)peripheral didDiscoverServices:(nullable NSError *)error{
     if (error){
         NSLog(@"扫描外设服务出错：%@-> %@", peripheral.name, [error localizedDescription]);
+        if(writeDataDelegate && (toWrite || waitingWriteResponse)){
+            [writeDataDelegate didWriteDataToBle:false];
+            toWrite = nil;
+            resetWriteState();
+        }
         return;
     }
     NSLog(@"扫描到外设服务：%@ -> %@",peripheral.name,peripheral.services);
+    // If we're discovering services for a pending write, track them so we can fail fast instead
+    // of leaving the JS Promise unresolved when no suitable service/characteristic exists.
+    if(toWrite && connected && [connected.identifier.UUIDString isEqualToString:peripheral.identifier.UUIDString]){
+        if(!pendingWriteServices){
+            pendingWriteServices = [[NSMutableSet alloc] init];
+        }else{
+            [pendingWriteServices removeAllObjects];
+        }
+        for (CBService *service in peripheral.services) {
+            if(service && service.UUID && service.UUID.UUIDString){
+                [pendingWriteServices addObject:service.UUID.UUIDString];
+            }
+            [peripheral discoverCharacteristics:nil forService:service];
+            NSLog(@"服务id：%@",service.UUID.UUIDString);
+        }
+        if([pendingWriteServices count] == 0){
+            NSLog(@"[BLE] No services discovered for peripheral %@ (%@)", peripheral.name, peripheral.identifier.UUIDString);
+            if(writeDataDelegate){
+                [writeDataDelegate didWriteDataToBle:false];
+            }
+            toWrite = nil;
+            resetWriteState();
+        }
+        NSLog(@"开始扫描外设服务的特征 %@...",peripheral.name);
+        return;
+    }
     for (CBService *service in peripheral.services) {
         [peripheral discoverCharacteristics:nil forService:service];
-         NSLog(@"服务id：%@",service.UUID.UUIDString);
+        NSLog(@"服务id：%@",service.UUID.UUIDString);
     }
     NSLog(@"开始扫描外设服务的特征 %@...",peripheral.name);
     
@@ -444,58 +717,93 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
 - (void)peripheral:(CBPeripheral *)peripheral didDiscoverCharacteristicsForService:(CBService *)service error:(nullable NSError *)error{
     if(toWrite && connected
        && [connected.identifier.UUIDString isEqualToString:peripheral.identifier.UUIDString]){
+        // Mark this service as processed for the pending write.
+        if(pendingWriteServices && service && service.UUID && service.UUID.UUIDString){
+            [pendingWriteServices removeObject:service.UUID.UUIDString];
+        }
         if(error){
             NSLog(@"Discrover charactoreristics error:%@",error);
            if(writeDataDelegate)
            {
-               [writeDataDelegate didWriteDataToBle:false];
+               // Only fail after all services are processed; other services may contain a writable characteristic.
+               if(!pendingWriteServices || [pendingWriteServices count] == 0){
+                   [writeDataDelegate didWriteDataToBle:false];
+                   toWrite = nil;
+                   resetWriteState();
+               }
                return;
            }
     }
         BOOL wrote = false;
-        BOOL hasPreferred = false;
+        CBCharacteristic *target = nil;
+        BOOL targetIsPreferred = NO;
+
+        // Prefer the hard-coded ISSC characteristic if present, otherwise fall back to the first writable characteristic.
         for(CBCharacteristic *cc in service.characteristics){
-            BOOL isPreferredService = supportServices
-              && [service.UUID.UUIDString isEqualToString:supportServices[0].UUIDString];
-            BOOL isPreferredChar = isPreferredService
-              && [cc.UUID.UUIDString isEqualToString:[writeableCharactiscs objectForKey: supportServices[0]]];
-            if (isPreferredChar) {
-                hasPreferred = true;
-            }
-        }
-        NSLog(@"[BLE] service %@ hasPreferred=%@", service.UUID.UUIDString, hasPreferred ? @"YES" : @"NO");
-        for(CBCharacteristic *cc in service.characteristics){
-            NSLog(@"Characterstic found: %@ in service: %@" ,cc,service.UUID.UUIDString);
+            if(!cc || !cc.UUID) continue;
             BOOL isPreferredService = supportServices
               && [service.UUID.UUIDString isEqualToString:supportServices[0].UUIDString];
             BOOL isPreferredChar = isPreferredService
               && [cc.UUID.UUIDString isEqualToString:[writeableCharactiscs objectForKey: supportServices[0]]];
             BOOL canWrite = (cc.properties & CBCharacteristicPropertyWrite)
               || (cc.properties & CBCharacteristicPropertyWriteWithoutResponse);
-
-            if(isPreferredChar || (!hasPreferred && canWrite)){
-                @try{
-                    CBCharacteristicWriteType writeType = (cc.properties & CBCharacteristicPropertyWriteWithoutResponse)
-                      ? CBCharacteristicWriteWithoutResponse
-                      : CBCharacteristicWriteWithResponse;
-                    NSLog(@"[BLE] writing to %@ type=%@", cc.UUID.UUIDString, writeType == CBCharacteristicWriteWithoutResponse ? @"withoutResponse" : @"withResponse");
-                    [connected writeValue:toWrite forCharacteristic:cc type:writeType];
-                    wrote = true;
-                    if(toWrite){
-                        NSLog(@"Value wrote: %lu",[toWrite length]);
-                    }
-                }
-                @catch(NSException *e){
-                    NSLog(@"ERRO IN WRITE VALUE: %@",e);
-                }
+            if(isPreferredChar && canWrite){
+                target = cc;
+                targetIsPreferred = YES;
+                break;
+            }
+            if(!target && canWrite){
+                target = cc;
             }
         }
-        NSLog(@"[BLE] write complete wrote=%@", wrote ? @"YES" : @"NO");
-        if(writeDataDelegate){
-            [writeDataDelegate didWriteDataToBle:wrote];
+
+        NSLog(@"[BLE] service %@ selectedChar=%@ preferred=%@",
+              service.UUID.UUIDString,
+              target ? target.UUID.UUIDString : @"<none>",
+              targetIsPreferred ? @"YES" : @"NO");
+
+        if(target){
+            if(peripheral && peripheral.identifier && peripheral.identifier.UUIDString){
+                cachedWriteCharacteristic = target;
+                cachedWritePeripheralId = peripheral.identifier.UUIDString;
+            }
+            @try{
+                NSUInteger payloadLength = [toWrite length];
+                CBCharacteristicWriteType writeType = preferredWriteType(target, payloadLength);
+                waitingWriteResponse = (writeType == CBCharacteristicWriteWithResponse);
+                NSLog(@"[BLE] writing to %@ type=%@ payload=%lu", target.UUID.UUIDString, writeType == CBCharacteristicWriteWithoutResponse ? @"withoutResponse" : @"withResponse", (unsigned long)payloadLength);
+                NSUInteger cappedLen = preferredChunkSize(connected, writeType, payloadLength);
+                NSLog(@"[BLE] chunkSize=%lu", (unsigned long)cappedLen);
+                pendingWritePayload = toWrite;
+                pendingWriteOffset = 0;
+                pendingWriteChunkSize = cappedLen;
+                pendingWriteCharacteristic = target;
+                pendingWriteType = writeType;
+                NSUInteger chunkCount = ([pendingWritePayload length] + pendingWriteChunkSize - 1) / pendingWriteChunkSize;
+                NSTimeInterval timeoutSec = MAX(15.0, (double)chunkCount * 0.1 + 5.0);
+                [RNBluetoothManager restartWriteTimeout:timeoutSec];
+                [RNBluetoothManager sendNextPendingChunk];
+                wrote = true;
+            }
+            @catch(NSException *e){
+                NSLog(@"ERRO IN WRITE VALUE: %@",e);
+                wrote = false;
+            }
         }
+
         if(wrote){
-            toWrite = nil;
+            // We have scheduled the write; clear discovery state so other service callbacks don't fail the Promise.
+            if(pendingWriteServices){
+                [pendingWriteServices removeAllObjects];
+            }
+        }else{
+            // No writable characteristic in this service. Fail only after all services are processed.
+            if((!pendingWriteServices || [pendingWriteServices count] == 0) && writeDataDelegate){
+                NSLog(@"[BLE] No writable characteristic found");
+                [writeDataDelegate didWriteDataToBle:false];
+                toWrite = nil;
+                resetWriteState();
+            }
         }
     }
     
@@ -617,12 +925,47 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
         if(writeDataDelegate){
             [writeDataDelegate didWriteDataToBle:false];
         }
+        toWrite = nil;
+        resetWriteState();
+        waitingWriteResponse = NO;
+        return;
     }
     
+    if (pendingWritePayload) {
+        waitingWriteResponse = NO;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(pendingRespDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [RNBluetoothManager sendNextPendingChunk];
+        });
+        return;
+    }
+
     NSLog(@"Write bluetooth success.");
     if(writeDataDelegate){
         [writeDataDelegate didWriteDataToBle:true];
     }
+    toWrite = nil;
+    resetWriteState();
+    waitingWriteResponse = NO;
+}
+
+- (void)peripheralIsReadyToSendWriteWithoutResponse:(CBPeripheral *)peripheral {
+    if (!pendingWritePayload || !pendingWriteCharacteristic) {
+        return;
+    }
+    if (!connected || !peripheral || !connected.identifier || !peripheral.identifier) {
+        return;
+    }
+    if (![connected.identifier.UUIDString isEqualToString:peripheral.identifier.UUIDString]) {
+        return;
+    }
+    if (!connected.canSendWriteWithoutResponse) {
+        return;
+    }
+    if (pendingWriteType != CBCharacteristicWriteWithoutResponse) {
+        return;
+    }
+    waitingNoRespReady = NO;
+    [RNBluetoothManager sendNextPendingChunk];
 }
 
 - (void) didWriteDataToBle: (BOOL)success{

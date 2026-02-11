@@ -32,6 +32,14 @@ export interface WriteBitmapOptions {
   dotsPerMm?: number;
   /** Invert raster for white background / black text. Default true */
   invert?: boolean;
+  /** Code format. Currently only QR is supported in bitmap labels. */
+  codeFormat?: "qr";
+  /** QR error correction level (L, M, Q, H). Default M. */
+  qrEcc?: "L" | "M" | "Q" | "H";
+  /** Desired folio font size in printer dots (raster). */
+  folioFontSizeDots?: number;
+  /** Desired QR size (square) in printer dots (raster). */
+  qrSizeDots?: number;
   /** Optional 1-bit logo raster (base64); width must match label widthBytes */
   logoRasterBase64?: string;
   /** Logo width in bytes (must equal ceil(widthMm*dotsPerMm/8)) */
