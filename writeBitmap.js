@@ -1,6 +1,6 @@
 "use strict";
 
-const { NativeModules, Platform } = require("react-native");
+const { NativeModules } = require("react-native");
 const { BluetoothManager } = NativeModules;
 
 const BASE64_PREFIX = "BASE64:";
@@ -507,21 +507,7 @@ async function writeBitmap(options) {
   );
   const payload = BASE64_PREFIX + bytesToBase64(payloadBytes);
 
-  // iOS BLE writes can hang or fail for large payloads if sent as one chunk.
-  // Chunking keeps each write within typical BLE limits and provides basic pacing.
-  const iosChunkSize = 20; // MTU 23 -> 20 bytes payload is safest across devices
-  if (Platform.OS !== "ios" || payloadBytes.length <= iosChunkSize) {
-    return BluetoothManager.writeRaw(payload);
-  }
-
-  const chunkSize = iosChunkSize;
-  const delayMs = 80;
-  for (let offset = 0; offset < payloadBytes.length; offset += chunkSize) {
-    const chunk = payloadBytes.subarray(offset, offset + chunkSize);
-    const chunkPayload = BASE64_PREFIX + bytesToBase64(chunk);
-    await BluetoothManager.writeRaw(chunkPayload);
-    if (delayMs) await sleep(delayMs);
-  }
+  return BluetoothManager.writeRaw(payload);
 }
 
 module.exports = { writeBitmap };
