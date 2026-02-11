@@ -41,6 +41,7 @@ static CBCharacteristicWriteType pendingWriteType = CBCharacteristicWriteWithout
 static CBCharacteristic *pendingWriteCharacteristic = nil;
 static BOOL waitingNoRespReady = NO;
 static NSTimeInterval pendingNoRespDelay = 0.05;
+static NSTimeInterval pendingRespDelay = 0.05;
 
 static void clearCachedWriteCharacteristic(void) {
     cachedWriteCharacteristic = nil;
@@ -187,12 +188,18 @@ static void resetWriteState(void) {
                     if (maxLen == 0) {
                         maxLen = 20;
                     }
+                    NSUInteger cappedLen = maxLen;
+                    if (writeType == CBCharacteristicWriteWithResponse) {
+                        cappedLen = MIN(maxLen, 120);
+                    } else {
+                        cappedLen = MIN(maxLen, 180);
+                    }
                     pendingWritePayload = toWrite;
                     pendingWriteOffset = 0;
-                    pendingWriteChunkSize = maxLen;
+                    pendingWriteChunkSize = cappedLen;
                     pendingWriteCharacteristic = cachedWriteCharacteristic;
                     pendingWriteType = writeType;
-                    NSUInteger chunkCount = ([pendingWritePayload length] + maxLen - 1) / maxLen;
+                    NSUInteger chunkCount = ([pendingWritePayload length] + pendingWriteChunkSize - 1) / pendingWriteChunkSize;
                     NSTimeInterval timeoutSec = MAX(15.0, (double)chunkCount * 0.1 + 5.0);
                     [RNBluetoothManager restartWriteTimeout:timeoutSec];
                     [RNBluetoothManager sendNextPendingChunk];
@@ -540,7 +547,7 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
 
 - (void)centralManager:(CBCentralManager *)central didDisconnectPeripheral:(CBPeripheral *)peripheral error:(nullable NSError *)error{
     clearCachedWriteCharacteristic();
-    if(writeDataDelegate && (toWrite || waitingWriteResponse || rawWriteResolve || rawWriteReject)){
+    if(writeDataDelegate && (toWrite || pendingWritePayload || waitingWriteResponse || waitingNoRespReady || rawWriteResolve || rawWriteReject)){
         [writeDataDelegate didWriteDataToBle:false];
         toWrite = nil;
         resetWriteState();
@@ -725,12 +732,18 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
                 if (maxLen == 0) {
                     maxLen = 20;
                 }
+                NSUInteger cappedLen = maxLen;
+                if (writeType == CBCharacteristicWriteWithResponse) {
+                    cappedLen = MIN(maxLen, 120);
+                } else {
+                    cappedLen = MIN(maxLen, 180);
+                }
                 pendingWritePayload = toWrite;
                 pendingWriteOffset = 0;
-                pendingWriteChunkSize = maxLen;
+                pendingWriteChunkSize = cappedLen;
                 pendingWriteCharacteristic = target;
                 pendingWriteType = writeType;
-                NSUInteger chunkCount = ([pendingWritePayload length] + maxLen - 1) / maxLen;
+                NSUInteger chunkCount = ([pendingWritePayload length] + pendingWriteChunkSize - 1) / pendingWriteChunkSize;
                 NSTimeInterval timeoutSec = MAX(15.0, (double)chunkCount * 0.1 + 5.0);
                 [RNBluetoothManager restartWriteTimeout:timeoutSec];
                 [RNBluetoothManager sendNextPendingChunk];
@@ -884,7 +897,9 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
     
     if (pendingWritePayload) {
         waitingWriteResponse = NO;
-        [RNBluetoothManager sendNextPendingChunk];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(pendingRespDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [RNBluetoothManager sendNextPendingChunk];
+        });
         return;
     }
 
