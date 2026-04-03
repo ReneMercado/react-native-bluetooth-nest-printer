@@ -52,6 +52,18 @@ Or yarn
 yarn add react-native-bluetooth-nest-printer
 ```
 
+#### Peer Dependency (required for `writeBitmap` QR rendering)
+
+If you use `writeBitmap` with `codeFormat: "qr"`, install `qrcode` in your app:
+
+```bash
+# npm
+npm install qrcode
+
+# yarn
+yarn add qrcode
+```
+
 ### Step 2
 
 - Android (on React Native 0.7x no need to do this step):

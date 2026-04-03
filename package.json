@@ -19,17 +19,13 @@
     "react-native-bluetooth-nest-printer",
     "react-native",
     "react-native-bluetooth",
-    "react-native-printer",
-    "Nguyễn Phúc Bảo Châu",
-    "dovuihainao",
-    "dovui",
-    "Đố vui hại não",
-    "Đố vui"
+    "react-native-printer"
   ],
   "author": "baochau9xx (modified by ReneMercado)",
   "license": "MIT",
   "peerDependencies": {
-    "react-native": ">=0.55.4"
+    "react-native": ">=0.55.4",
+    "qrcode": "^1.5.4"
   },
   "repository": {
     "type": "git",

@@ -7,6 +7,14 @@ const BASE64_PREFIX = "BASE64:";
 const BASE64_CHARS =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
+let QRCode;
+try {
+  // Dependency is expected to be provided by the host app.
+  QRCode = require("qrcode");
+} catch (e) {
+  QRCode = null;
+}
+
 function asciiToBytes(text) {
   const bytes = new Uint8Array(text.length);
   for (let i = 0; i < text.length; i += 1) {
@@ -50,6 +58,10 @@ function bytesToBase64(bytes) {
     output += "=";
   }
   return output;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function normalizeBitmapText(value) {
@@ -174,6 +186,84 @@ function drawPseudoBarcode(
   }
 }
 
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function getQrModules(value, errorCorrectionLevel) {
+  if (!QRCode || typeof QRCode.create !== "function") {
+    throw new Error(
+      "qrcode dependency is required to render QR bitmap labels"
+    );
+  }
+
+  const qr = QRCode.create(String(value || ""), {
+    errorCorrectionLevel: errorCorrectionLevel || "M",
+  });
+
+  return {
+    size: qr.modules.size,
+    data: qr.modules.data,
+  };
+}
+
+function drawQrCode(
+  buffer,
+  widthBytes,
+  widthDots,
+  heightDots,
+  x,
+  y,
+  boxSizeDots,
+  value,
+  errorCorrectionLevel
+) {
+  if (boxSizeDots <= 0) return false;
+
+  let modules;
+  try {
+    modules = getQrModules(value, errorCorrectionLevel);
+  } catch (e) {
+    return false;
+  }
+
+  const quietZoneModules = 4;
+  const moduleCount = modules.size;
+  const totalModules = moduleCount + quietZoneModules * 2;
+  const moduleSize = Math.floor(boxSizeDots / totalModules);
+  if (moduleSize <= 0) return false;
+
+  const renderedSize = moduleSize * totalModules;
+  const offsetX =
+    x +
+    Math.floor((boxSizeDots - renderedSize) / 2) +
+    quietZoneModules * moduleSize;
+  const offsetY =
+    y +
+    Math.floor((boxSizeDots - renderedSize) / 2) +
+    quietZoneModules * moduleSize;
+
+  for (let row = 0; row < moduleCount; row += 1) {
+    for (let col = 0; col < moduleCount; col += 1) {
+      const idx = row * moduleCount + col;
+      if (modules.data[idx]) {
+        fillRect(
+          buffer,
+          widthBytes,
+          widthDots,
+          heightDots,
+          offsetX + col * moduleSize,
+          offsetY + row * moduleSize,
+          moduleSize,
+          moduleSize
+        );
+      }
+    }
+  }
+
+  return true;
+}
+
 function decodeBase64ToBytes(base64) {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -194,12 +284,16 @@ function decodeBase64ToBytes(base64) {
  * @param {number} options.heightMm - Label height in mm
  * @param {number} [options.dotsPerMm=8] - Dots per mm (~8 for 203 DPI)
  * @param {boolean} [options.invert=true] - If true, invert raster for white background / black text
+ * @param {string} [options.codeFormat='qr'] - Code format. Currently only QR is supported.
+ * @param {'L'|'M'|'Q'|'H'} [options.qrEcc='M'] - QR error correction level.
+ * @param {number} [options.folioFontSizeDots] - Desired folio height in printer dots.
+ * @param {number} [options.qrSizeDots] - Desired QR box size (square) in printer dots.
  * @param {string} [options.logoRasterBase64] - Optional 1-bit logo raster (base64), same width as label
  * @param {number} [options.logoWidthBytes] - Logo width in bytes (must equal widthBytes)
  * @param {number} [options.logoHeightDots] - Logo height in dots
  * @returns {Promise<void>}
  */
-function writeBitmap(options) {
+async function writeBitmap(options) {
   const {
     code = "CODE",
     lines = [],
@@ -207,6 +301,10 @@ function writeBitmap(options) {
     heightMm,
     dotsPerMm = 8,
     invert = true,
+    codeFormat = "qr",
+    qrEcc = "M",
+    folioFontSizeDots,
+    qrSizeDots,
     logoRasterBase64,
     logoWidthBytes,
     logoHeightDots,
@@ -245,50 +343,141 @@ function writeBitmap(options) {
     }
   }
 
-  const barcodeHeightMm = Math.min(30, Math.max(12, heightMm * 0.4));
-  const barcodeHeightDots = mmToDots(barcodeHeightMm);
-  const lineHeightMm = Math.max(4, heightMm * 0.12);
-  const lineHeightDots = mmToDots(lineHeightMm);
-  const barcodeY = contentAreaTop + marginDots;
-  const textStartY = contentAreaTop + marginDots + barcodeHeightDots + mmToDots(2);
-
-  drawPseudoBarcode(
-    buffer,
-    widthBytes,
-    widthDots,
-    heightDots,
-    marginDots,
-    barcodeY,
-    widthDots - marginDots * 2,
-    barcodeHeightDots,
-    String(code)
-  );
-
   const availableWidth = widthDots - marginDots * 2;
-  const linesList = Array.isArray(lines) ? lines.slice(0, 8) : [];
-  const maxLineLength = Math.max(
-    1,
-    ...linesList.map((line) => normalizeBitmapText(String(line)).length)
-  );
-  const scaleByWidth = Math.floor(availableWidth / (maxLineLength * 6));
-  const scaleByHeight = Math.floor(Math.max(7, lineHeightDots - 2) / 7);
-  const scale = Math.max(1, Math.min(3, scaleByWidth, scaleByHeight));
-  const lineGap = Math.max(lineHeightDots, scale * 8);
+  const bottomLimit = heightDots - marginDots;
 
-  linesList.forEach((line, index) => {
-    const maxChars = Math.max(1, Math.floor(availableWidth / (6 * scale)));
-    const safeLine = normalizeBitmapText(String(line)).slice(0, maxChars);
-    drawTextLine(
+  const linesList = Array.isArray(lines)
+    ? lines
+        .map((line) => String(line ?? ""))
+        .filter(Boolean)
+        .slice(0, 8)
+    : [];
+
+  let cursorY = contentAreaTop + marginDots;
+
+  if (String(codeFormat).toLowerCase() === "qr") {
+    const desiredQrSizeDots =
+      typeof qrSizeDots === "number" && qrSizeDots > 0
+        ? Math.round(qrSizeDots)
+        : Math.min(availableWidth, bottomLimit - cursorY);
+    const maxQrSizeDots = Math.max(1, Math.min(availableWidth, bottomLimit - cursorY));
+    const qrBoxSize = clamp(desiredQrSizeDots, 1, maxQrSizeDots);
+    const qrX = Math.max(marginDots, Math.floor((widthDots - qrBoxSize) / 2));
+    const qrOk = drawQrCode(
+      buffer,
+      widthBytes,
+      widthDots,
+      heightDots,
+      qrX,
+      cursorY,
+      qrBoxSize,
+      String(code),
+      qrEcc
+    );
+    if (!qrOk) {
+      drawPseudoBarcode(
+        buffer,
+        widthBytes,
+        widthDots,
+        heightDots,
+        marginDots,
+        cursorY,
+        availableWidth,
+        Math.max(1, Math.floor(qrBoxSize * 0.35)),
+        String(code)
+      );
+    }
+    cursorY += qrBoxSize + mmToDots(2);
+  } else {
+    const barcodeHeightMm = Math.min(30, Math.max(12, heightMm * 0.4));
+    const barcodeHeightDots = mmToDots(barcodeHeightMm);
+    drawPseudoBarcode(
       buffer,
       widthBytes,
       widthDots,
       heightDots,
       marginDots,
-      textStartY + index * lineGap,
-      safeLine,
-      scale
+      cursorY,
+      availableWidth,
+      barcodeHeightDots,
+      String(code)
     );
-  });
+    cursorY += barcodeHeightDots + mmToDots(2);
+  }
+
+  const folioLine = linesList[0] || "";
+  const infoLines = linesList.slice(1);
+
+  if (folioLine && cursorY < bottomLimit) {
+    const safeFolio = normalizeBitmapText(folioLine);
+    const desiredScale =
+      typeof folioFontSizeDots === "number" && folioFontSizeDots > 0
+        ? Math.max(1, Math.round(folioFontSizeDots / 7))
+        : 3;
+    const folioLen = Math.max(1, safeFolio.length);
+    const maxScaleByWidth = Math.max(1, Math.floor(availableWidth / (folioLen * 6)));
+    const maxScaleByHeight = Math.max(1, Math.floor((bottomLimit - cursorY) / 7));
+    const folioScale = Math.max(
+      1,
+      Math.min(desiredScale, maxScaleByWidth, maxScaleByHeight)
+    );
+
+    const maxFolioChars = Math.max(1, Math.floor(availableWidth / (6 * folioScale)));
+    const trimmedFolio = safeFolio.slice(0, maxFolioChars);
+    const folioWidthDots = trimmedFolio.length * 6 * folioScale;
+    const folioX = Math.max(
+      marginDots,
+      Math.floor((widthDots - folioWidthDots) / 2)
+    );
+    drawTextLine(
+      buffer,
+      widthBytes,
+      widthDots,
+      heightDots,
+      folioX,
+      cursorY,
+      trimmedFolio,
+      folioScale
+    );
+
+    cursorY += 7 * folioScale + mmToDots(1);
+
+    if (infoLines.length > 0 && cursorY < bottomLimit) {
+      const maxInfoLen = Math.max(
+        1,
+        ...infoLines.map((line) => normalizeBitmapText(String(line)).length)
+      );
+      const maxInfoScaleByWidth = Math.max(
+        1,
+        Math.floor(availableWidth / (maxInfoLen * 6))
+      );
+      let infoScale = clamp(Math.round(folioScale * 0.4), 1, 4);
+      infoScale = Math.max(1, Math.min(infoScale, maxInfoScaleByWidth));
+      let infoLineGap = infoScale * 8;
+      let maxLinesFit = Math.floor((bottomLimit - cursorY) / infoLineGap);
+
+      while (infoScale > 1 && maxLinesFit === 0) {
+        infoScale -= 1;
+        infoLineGap = infoScale * 8;
+        maxLinesFit = Math.floor((bottomLimit - cursorY) / infoLineGap);
+      }
+
+      const maxInfoChars = Math.max(1, Math.floor(availableWidth / (6 * infoScale)));
+      infoLines.slice(0, Math.max(0, maxLinesFit)).forEach((line, index) => {
+        const safeLine = normalizeBitmapText(String(line)).slice(0, maxInfoChars);
+        drawTextLine(
+          buffer,
+          widthBytes,
+          widthDots,
+          heightDots,
+          marginDots,
+          cursorY + index * infoLineGap,
+          safeLine,
+          infoScale
+        );
+      });
+    }
+  }
 
   if (invert) {
     for (let i = 0; i < buffer.length; i += 1) {
