@@ -42,6 +42,9 @@ static NSUInteger pendingWriteOffset = 0;
 static NSUInteger pendingWriteChunkSize = 0;
 static CBCharacteristicWriteType pendingWriteType = CBCharacteristicWriteWithoutResponse;
 static CBCharacteristic *pendingWriteCharacteristic = nil;
+static NSMutableSet<NSString *> *pendingConnectServices = nil;
+static CBCharacteristic *pendingConnectCandidateCharacteristic = nil;
+static BOOL waitingConnectWritable = NO;
 static BOOL waitingNoRespReady = NO;
 static NSTimeInterval pendingNoRespDelay = 0.05;
 static NSTimeInterval pendingRespDelay = 0.05;
@@ -78,6 +81,47 @@ static void recordRawWriteError(NSString *code, NSString *message, NSError *erro
 
 static BOOL hasWriteWithoutResponse(CBCharacteristic *characteristic) {
     return characteristic && ((characteristic.properties & CBCharacteristicPropertyWriteWithoutResponse) != 0);
+}
+
+static BOOL canWriteToCharacteristic(CBCharacteristic *characteristic) {
+    return characteristic && (hasWriteWithResponse(characteristic) || hasWriteWithoutResponse(characteristic));
+}
+
+static BOOL isPreferredWriteCharacteristic(CBService *service, CBCharacteristic *characteristic) {
+    if (!service || !characteristic || !service.UUID || !characteristic.UUID || !supportServices) {
+        return NO;
+    }
+    BOOL isPreferredService = [service.UUID.UUIDString isEqualToString:supportServices[0].UUIDString];
+    if (!isPreferredService) {
+        return NO;
+    }
+    NSString *preferredCharacteristicUuid = [writeableCharactiscs objectForKey:supportServices[0]];
+    return preferredCharacteristicUuid && [characteristic.UUID.UUIDString isEqualToString:preferredCharacteristicUuid];
+}
+
+static CBCharacteristic *selectWritableCharacteristicForService(CBService *service, BOOL *isPreferredOut) {
+    CBCharacteristic *fallback = nil;
+
+    for (CBCharacteristic *characteristic in service.characteristics) {
+        if (!canWriteToCharacteristic(characteristic)) {
+            continue;
+        }
+        if (isPreferredWriteCharacteristic(service, characteristic)) {
+            if (isPreferredOut) {
+                *isPreferredOut = YES;
+            }
+            return characteristic;
+        }
+        if (!fallback) {
+            fallback = characteristic;
+        }
+    }
+
+    if (isPreferredOut) {
+        *isPreferredOut = NO;
+    }
+
+    return fallback;
 }
 
 static BOOL preferWriteWithoutResponse(CBCharacteristic *characteristic, NSUInteger payloadLength) {
@@ -154,6 +198,14 @@ static void clearPendingWrite(void) {
     pendingWriteChunkSize = 0;
     pendingWriteCharacteristic = nil;
     pendingWriteType = CBCharacteristicWriteWithoutResponse;
+}
+
+static void clearPendingConnectWarmup(void) {
+    waitingConnectWritable = NO;
+    pendingConnectCandidateCharacteristic = nil;
+    if (pendingConnectServices) {
+        [pendingConnectServices removeAllObjects];
+    }
 }
 
 static void resetWriteState(void) {
@@ -344,6 +396,51 @@ static void resetWriteState(void) {
     }
     toWrite = nil;
     resetWriteState();
+}
+
+- (void)emitConnectedEventForPeripheral:(CBPeripheral *)peripheral {
+    if(hasListeners){
+        [self sendEventWithName:EVENT_CONNECTED body:@{@"device":@{@"name":peripheral.name?peripheral.name:@"",@"address":peripheral.identifier.UUIDString}}];
+    }
+}
+
+- (void)resolveConnectWhenWritableReady:(CBPeripheral *)peripheral characteristic:(CBCharacteristic *)characteristic {
+    if (peripheral && peripheral.identifier && peripheral.identifier.UUIDString) {
+        cachedWriteCharacteristic = characteristic;
+        cachedWritePeripheralId = peripheral.identifier.UUIDString;
+    }
+    pendingConnectAddress = nil;
+    pendingConnectRetryCount = 0;
+    clearPendingConnectWarmup();
+
+    if (self.connectResolveBlock) {
+        RCTPromiseResolveBlock resolveBlock = self.connectResolveBlock;
+        resolveBlock(nil);
+    }
+    _waitingConnect = nil;
+    self.connectResolveBlock = nil;
+    self.connectRejectBlock = nil;
+    [self emitConnectedEventForPeripheral:peripheral];
+}
+
+- (void)rejectPendingConnectForPeripheral:(CBPeripheral *)peripheral code:(NSString *)code message:(NSString *)message error:(NSError *)error {
+    clearPendingConnectWarmup();
+    clearCachedWriteCharacteristic();
+    pendingConnectAddress = nil;
+    pendingConnectRetryCount = 0;
+
+    if(self.connectRejectBlock){
+        RCTPromiseRejectBlock rejectBlock = self.connectRejectBlock;
+        rejectBlock(code ?: @"CONNECT_FAILED", message ?: @"CONNECT_FAILED", error);
+    }
+    self.connectRejectBlock = nil;
+    self.connectResolveBlock = nil;
+    _waitingConnect = nil;
+    connected = nil;
+
+    if(hasListeners){
+        [self sendEventWithName:EVENT_UNABLE_CONNECT body:@{@"name":peripheral.name?peripheral.name:@"",@"address":peripheral.identifier.UUIDString ?: @""}];
+    }
 }
 
 // Will be called when this module's first listener is added.
@@ -643,22 +740,20 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
     pendingConnectRetryCount = 0;
     NSString *pId = peripheral.identifier.UUIDString;
     if(_waitingConnect && [_waitingConnect isEqualToString: pId] && self.connectResolveBlock){
-        NSLog(@"Predefined the support services, stop to looking up services.");
-//        peripheral.delegate=self;
-//        [peripheral discoverServices:nil];
-        self.connectResolveBlock(nil);
-        _waitingConnect = nil;
-        self.connectRejectBlock = nil;
-        self.connectResolveBlock = nil;
+        NSLog(@"Preparing writable BLE characteristic before resolving connect.");
+        clearPendingConnectWarmup();
+        waitingConnectWritable = YES;
+        peripheral.delegate = self;
+        [peripheral discoverServices:nil];
+        return;
     }
-       NSLog(@"going to emit EVENT_CONNECTED.");
-    if(hasListeners){
-        [self sendEventWithName:EVENT_CONNECTED body:@{@"device":@{@"name":peripheral.name?peripheral.name:@"",@"address":peripheral.identifier.UUIDString}}];
-    }
+    NSLog(@"going to emit EVENT_CONNECTED.");
+    [self emitConnectedEventForPeripheral:peripheral];
 }
 
 - (void)centralManager:(CBCentralManager *)central didDisconnectPeripheral:(CBPeripheral *)peripheral error:(nullable NSError *)error{
     clearCachedWriteCharacteristic();
+    clearPendingConnectWarmup();
     if(writeDataDelegate && (toWrite || pendingWritePayload || waitingWriteResponse || waitingNoRespReady || rawWriteResolve || rawWriteReject)){
         NSString *message = [NSString stringWithFormat:@"Peripheral disconnected during BLE write%@",
                              error.localizedDescription.length > 0
@@ -692,6 +787,7 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
 - (void)centralManager:(CBCentralManager *)central didFailToConnectPeripheral:(CBPeripheral *)peripheral error:(nullable NSError *)error{
     BOOL canRetry = NO;
     NSString *peripheralId = peripheral.identifier.UUIDString;
+    clearPendingConnectWarmup();
     if (pendingConnectAddress && peripheralId && [pendingConnectAddress isEqualToString:peripheralId]) {
         canRetry = shouldRetryConnectForError(error) && (pendingConnectRetryCount < maxConnectRetries);
     }
@@ -739,6 +835,16 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
 - (void)peripheral:(CBPeripheral *)peripheral didDiscoverServices:(nullable NSError *)error{
     if (error){
         NSLog(@"扫描外设服务出错：%@-> %@", peripheral.name, [error localizedDescription]);
+        if (waitingConnectWritable && connected && [connected.identifier.UUIDString isEqualToString:peripheral.identifier.UUIDString]) {
+            NSString *message = [NSString stringWithFormat:@"Service discovery failed while preparing writable BLE characteristic for %@: %@",
+                                 peripheral.identifier.UUIDString ?: @"<unknown>",
+                                 error.localizedDescription ?: @"unknown error"];
+            [self rejectPendingConnectForPeripheral:peripheral
+                                               code:@"SERVICE_DISCOVERY_FAILED"
+                                            message:message
+                                              error:error];
+            return;
+        }
         if(writeDataDelegate && (toWrite || waitingWriteResponse)){
             NSString *message = [NSString stringWithFormat:@"Service discovery failed for peripheral %@: %@",
                                  peripheral.identifier.UUIDString ?: @"<unknown>",
@@ -751,6 +857,28 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
         return;
     }
     NSLog(@"扫描到外设服务：%@ -> %@",peripheral.name,peripheral.services);
+    if (waitingConnectWritable && connected && [connected.identifier.UUIDString isEqualToString:peripheral.identifier.UUIDString]) {
+        if (!pendingConnectServices) {
+            pendingConnectServices = [[NSMutableSet alloc] init];
+        } else {
+            [pendingConnectServices removeAllObjects];
+        }
+        for (CBService *service in peripheral.services) {
+            if(service && service.UUID && service.UUID.UUIDString){
+                [pendingConnectServices addObject:service.UUID.UUIDString];
+            }
+            [peripheral discoverCharacteristics:nil forService:service];
+            NSLog(@"服务id：%@",service.UUID.UUIDString);
+        }
+        if([pendingConnectServices count] == 0){
+            [self rejectPendingConnectForPeripheral:peripheral
+                                               code:@"NO_DISCOVERED_SERVICES"
+                                            message:[NSString stringWithFormat:@"No BLE services were discovered while preparing writable characteristic for %@", peripheral.identifier.UUIDString ?: @"<unknown>"]
+                                              error:nil];
+        }
+        NSLog(@"开始扫描外设服务的特征 %@...",peripheral.name);
+        return;
+    }
     // If we're discovering services for a pending write, track them so we can fail fast instead
     // of leaving the JS Promise unresolved when no suitable service/characteristic exists.
     if(toWrite && connected && [connected.identifier.UUIDString isEqualToString:peripheral.identifier.UUIDString]){
@@ -794,7 +922,7 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
         self.connectResolveBlock = nil;
         connected = nil;
     }else
-    if(_waitingConnect && _waitingConnect == peripheral.identifier.UUIDString){
+    if(_waitingConnect && peripheral.identifier.UUIDString && [_waitingConnect isEqualToString:peripheral.identifier.UUIDString]){
         RCTPromiseResolveBlock rsBlock = self.connectResolveBlock;
         rsBlock(peripheral.identifier.UUIDString);
         self.connectRejectBlock = nil;
@@ -814,6 +942,56 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
  *                        they can be retrieved via <i>service</i>'s <code>characteristics</code> property.
  */
 - (void)peripheral:(CBPeripheral *)peripheral didDiscoverCharacteristicsForService:(CBService *)service error:(nullable NSError *)error{
+    if(waitingConnectWritable && connected
+       && [connected.identifier.UUIDString isEqualToString:peripheral.identifier.UUIDString]){
+        if(pendingConnectServices && service && service.UUID && service.UUID.UUIDString){
+            [pendingConnectServices removeObject:service.UUID.UUIDString];
+        }
+        if(error){
+            NSLog(@"Discrover charactoreristics error during connect warmup:%@",error);
+            if(!pendingConnectServices || [pendingConnectServices count] == 0){
+                NSString *message = [NSString stringWithFormat:@"Characteristic discovery failed while preparing writable BLE characteristic for service %@: %@",
+                                     service.UUID.UUIDString ?: @"<unknown>",
+                                     error.localizedDescription ?: @"unknown error"];
+                [self rejectPendingConnectForPeripheral:peripheral
+                                                   code:@"CHARACTERISTIC_DISCOVERY_FAILED"
+                                                message:message
+                                                  error:error];
+            }
+            return;
+        }
+
+        BOOL selectedCharacteristicIsPreferred = NO;
+        CBCharacteristic *selectedCharacteristic = selectWritableCharacteristicForService(service, &selectedCharacteristicIsPreferred);
+
+        NSLog(@"[BLE] connect warmup service %@ selectedChar=%@ preferred=%@",
+              service.UUID.UUIDString,
+              selectedCharacteristic ? selectedCharacteristic.UUID.UUIDString : @"<none>",
+              selectedCharacteristicIsPreferred ? @"YES" : @"NO");
+
+        if(selectedCharacteristic){
+            if(selectedCharacteristicIsPreferred || !pendingConnectCandidateCharacteristic){
+                pendingConnectCandidateCharacteristic = selectedCharacteristic;
+            }
+
+            if(selectedCharacteristicIsPreferred){
+                [self resolveConnectWhenWritableReady:peripheral characteristic:selectedCharacteristic];
+                return;
+            }
+        }
+
+        if(!pendingConnectServices || [pendingConnectServices count] == 0){
+            if(pendingConnectCandidateCharacteristic){
+                [self resolveConnectWhenWritableReady:peripheral characteristic:pendingConnectCandidateCharacteristic];
+            }else{
+                [self rejectPendingConnectForPeripheral:peripheral
+                                                   code:@"NO_WRITABLE_CHARACTERISTIC"
+                                                message:@"No writable BLE characteristic was found while preparing writeRaw on the connected peripheral"
+                                                  error:nil];
+            }
+        }
+        return;
+    }
     if(toWrite && connected
        && [connected.identifier.UUIDString isEqualToString:peripheral.identifier.UUIDString]){
         // Mark this service as processed for the pending write.
