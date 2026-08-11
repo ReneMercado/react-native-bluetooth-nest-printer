@@ -1,5 +1,10 @@
 import * as React from "react";
 
+export interface BluetoothDevice {
+  name: string | null;
+  address: string;
+}
+
 export interface BluetoothProps {
   EVENT_DEVICE_ALREADY_PAIRED?: boolean;
   EVENT_DEVICE_FOUND?: boolean;
@@ -13,11 +18,17 @@ export interface BluetoothProps {
   enableBluetooth?: Function;
   disableBluetooth?: Function;
   scanDevices?: Promise<Function>;
+  getPairedDevices?: () => Promise<BluetoothDevice[]>;
   connect?: Promise<Function>;
   writeRaw?: (data: string) => Promise<void>;
 }
 
-export function BluetoothManager(props: BluetoothProps): any;
+export interface BluetoothManagerModule extends BluetoothProps {
+  /** Android only: returns bonded devices without starting discovery. */
+  getPairedDevices(): Promise<BluetoothDevice[]>;
+}
+
+export const BluetoothManager: BluetoothManagerModule;
 
 export interface WriteBitmapOptions {
   /** Barcode / order code (drawn as pseudo-barcode) */

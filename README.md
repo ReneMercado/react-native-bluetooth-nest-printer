@@ -136,6 +136,19 @@ BluetoothManager.enableBluetooth().then(
 );
 ```
 
+- getPairedDevices ==> `diff + ANDROID ONLY`
+  async function, returns Android bonded devices immediately without running a discovery scan. Each device is returned as a native object with `name` and `address`, so no JSON parsing is needed. iOS does not provide an equivalent Android-style bonded-device list, so the method rejects there with `UNSUPPORTED_PLATFORM`.
+
+```javascript
+const pairedDevices = await BluetoothManager.getPairedDevices();
+console.log(pairedDevices);
+```
+
+On Android 12 and newer, the consuming app must declare and request the
+`BLUETOOTH_CONNECT` runtime permission before calling this method. If the
+permission is missing, the promise rejects with
+`BLUETOOTH_CONNECT_PERMISSION_REQUIRED` instead of crashing the native module.
+
 - disableBluetooth ==> `diff + ANDROID ONLY`
   async function ,disable the bluetooth service. `diff - IOS would just resovle with nil`
 

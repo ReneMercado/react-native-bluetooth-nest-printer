@@ -519,6 +519,16 @@ RCT_EXPORT_METHOD(enableBluetooth:(RCTPromiseResolveBlock)resolve
 {
     resolve(nil);
 }
+
+// iOS does not expose an Android-style bonded-device list.
+RCT_EXPORT_METHOD(getPairedDevices:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+    reject(@"UNSUPPORTED_PLATFORM",
+           @"getPairedDevices is only available on Android.",
+           nil);
+}
+
 //disableBluetooth
 RCT_EXPORT_METHOD(disableBluetooth:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
