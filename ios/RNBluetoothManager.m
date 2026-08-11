@@ -625,6 +625,43 @@ RCT_EXPORT_METHOD(connect:(NSString *)address
     }
 }
 
+RCT_EXPORT_METHOD(disconnect:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+    @try {
+        [self callStop];
+
+        if(self.connectRejectBlock){
+            self.connectRejectBlock(@"CONNECT_CANCELLED",
+                                    @"Bluetooth connection was cancelled.",
+                                    nil);
+        }
+        self.connectRejectBlock = nil;
+        self.connectResolveBlock = nil;
+        _waitingConnect = nil;
+        pendingConnectAddress = nil;
+        pendingConnectRetryCount = 0;
+        clearPendingConnectWarmup();
+
+        if(writeDataDelegate && (toWrite || pendingWritePayload || waitingWriteResponse || waitingNoRespReady || rawWriteResolve || rawWriteReject)){
+            recordRawWriteError(@"DISCONNECTED", @"Bluetooth connection was cleared.", nil);
+            [writeDataDelegate didWriteDataToBle:false];
+        }
+        toWrite = nil;
+        resetWriteState();
+        clearCachedWriteCharacteristic();
+
+        if(connected){
+            [self.centralManager cancelPeripheralConnection:connected];
+        }
+        connected = nil;
+        resolve(nil);
+    }
+    @catch(NSException *exception){
+        reject(@"DISCONNECT_FAILED", [exception reason], nil);
+    }
+}
+
 RCT_EXPORT_METHOD(writeRaw:(NSString *)data
                   withResolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
