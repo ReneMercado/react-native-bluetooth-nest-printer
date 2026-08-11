@@ -137,7 +137,7 @@ BluetoothManager.enableBluetooth().then(
 ```
 
 - getPairedDevices ==> `diff + ANDROID ONLY`
-  async function, returns Android bonded devices immediately without running a discovery scan. Each device is returned as a native object with `name` and `address`, so no JSON parsing is needed. iOS does not provide an equivalent Android-style bonded-device list.
+  async function, returns Android bonded devices immediately without running a discovery scan. Each device is returned as a native object with `name` and `address`, so no JSON parsing is needed. iOS does not provide an equivalent Android-style bonded-device list, so the method rejects there with `UNSUPPORTED_PLATFORM`.
 
 ```javascript
 const pairedDevices = await BluetoothManager.getPairedDevices();

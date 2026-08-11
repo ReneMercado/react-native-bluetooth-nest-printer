@@ -23,12 +23,12 @@ export interface BluetoothProps {
   writeRaw?: (data: string) => Promise<void>;
 }
 
-export function BluetoothManager(props: BluetoothProps): any;
-
-export namespace BluetoothManager {
+export interface BluetoothManagerModule extends BluetoothProps {
   /** Android only: returns bonded devices without starting discovery. */
-  function getPairedDevices(): Promise<BluetoothDevice[]>;
+  getPairedDevices(): Promise<BluetoothDevice[]>;
 }
+
+export const BluetoothManager: BluetoothManagerModule;
 
 export interface WriteBitmapOptions {
   /** Barcode / order code (drawn as pseudo-barcode) */

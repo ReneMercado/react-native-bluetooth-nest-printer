@@ -79,6 +79,15 @@ test("TypeScript and README expose the Android-only API", () => {
     declarations,
     /getPairedDevices\(\):\s*Promise<BluetoothDevice\[\]>/
   );
+  assert.match(declarations, /interface BluetoothManagerModule/);
+  assert.match(
+    declarations,
+    /export const BluetoothManager:\s*BluetoothManagerModule/
+  );
+
+  const iosModule = read("ios/RNBluetoothManager.m");
+  assert.match(iosModule, /RCT_EXPORT_METHOD\(getPairedDevices/);
+  assert.match(iosModule, /UNSUPPORTED_PLATFORM/);
 
   const readme = read("README.md");
   assert.match(readme, /getPairedDevices/);
