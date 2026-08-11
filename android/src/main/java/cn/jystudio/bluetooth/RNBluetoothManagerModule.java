@@ -256,6 +256,24 @@ public class RNBluetoothManagerModule extends ReactContextBaseJavaModule
     }
 
     @ReactMethod
+    public void disconnect(final Promise promise) {
+        try {
+            cancelDisCovery();
+            Promise pendingConnection = promiseMap.remove(PROMISE_CONNECT);
+            if (pendingConnection != null) {
+                pendingConnection.reject("CONNECT_CANCELLED", "Bluetooth connection was cancelled.");
+            }
+            if (mService != null) {
+                mService.disconnect();
+            }
+            mConnectedDeviceName = null;
+            promise.resolve(null);
+        } catch (Exception exception) {
+            promise.reject("DISCONNECT_FAILED", exception);
+        }
+    }
+
+    @ReactMethod
     public void writeRaw(String data, final Promise promise) {
         if (mService == null || mService.getState() != BluetoothService.STATE_CONNECTED) {
             promise.reject("NOT_CONNECTED");

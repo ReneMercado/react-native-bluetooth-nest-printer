@@ -109,7 +109,7 @@ BluetoothManager.isBluetoothEnabled().then(
   (err) => {
     alert(err);
   }
-);
+  );
 ```
 
 - enableBluetooth ==> `diff + ANDROID ONLY`
@@ -225,7 +225,14 @@ BluetoothManager.connect(rowData.address) // the device address scanned.
       });
       alert(e);
     }
-  );
+);
+```
+
+- disconnect ==>
+  async function, close the active printer transport. This keeps the device paired with the operating system.
+
+```javascript
+await BluetoothManager.disconnect();
 ```
 
 - unpaire ==>

@@ -152,6 +152,17 @@ public class BluetoothService {
     }
 
     /**
+     * Close the active transport without changing the device bond.
+     */
+    public synchronized void disconnect() {
+        if (mConnectedThread != null) {
+            mConnectedThread.cancel();
+            mConnectedThread = null;
+        }
+        setState(STATE_NONE, null);
+    }
+
+    /**
      * Write to the ConnectedThread in an unsynchronized manner
      *
      * @param out The bytes to write

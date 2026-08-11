@@ -20,12 +20,15 @@ export interface BluetoothProps {
   scanDevices?: Promise<Function>;
   getPairedDevices?: () => Promise<BluetoothDevice[]>;
   connect?: Promise<Function>;
+  disconnect?: () => Promise<void>;
   writeRaw?: (data: string) => Promise<void>;
 }
 
 export interface BluetoothManagerModule extends BluetoothProps {
   /** Android only: returns bonded devices without starting discovery. */
   getPairedDevices(): Promise<BluetoothDevice[]>;
+  /** Closes the active Bluetooth transport without unpairing the device. */
+  disconnect(): Promise<void>;
 }
 
 export const BluetoothManager: BluetoothManagerModule;
