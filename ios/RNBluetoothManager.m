@@ -51,6 +51,19 @@ static NSTimeInterval pendingRespDelay = 0.05;
 static NSString *pendingConnectAddress = nil;
 static NSUInteger pendingConnectRetryCount = 0;
 static const NSUInteger maxConnectRetries = 1;
+typedef NS_ENUM(NSUInteger, RNBluetoothPendingConnectPhase) {
+    RNBluetoothPendingConnectPhaseIdle = 0,
+    RNBluetoothPendingConnectPhaseWaitingForBluetooth,
+    RNBluetoothPendingConnectPhaseWaitingForPreviousDisconnect,
+    RNBluetoothPendingConnectPhaseScanning,
+    RNBluetoothPendingConnectPhaseConnecting,
+    RNBluetoothPendingConnectPhaseRetryScheduled,
+    RNBluetoothPendingConnectPhaseDiscoveringWritable,
+};
+static RNBluetoothPendingConnectPhase pendingConnectPhase = RNBluetoothPendingConnectPhaseIdle;
+static CBPeripheral *pendingConnectPeripheral = nil;
+static NSTimer *pendingConnectTimeoutTimer = nil;
+static const NSTimeInterval pendingConnectTimeoutInterval = 30.0;
 
 static BOOL hasWriteWithResponse(CBCharacteristic *characteristic) {
     return characteristic && ((characteristic.properties & CBCharacteristicPropertyWrite) != 0);
@@ -404,43 +417,197 @@ static void resetWriteState(void) {
     }
 }
 
+- (void)clearPendingConnectRequest {
+    if (pendingConnectTimeoutTimer && pendingConnectTimeoutTimer.isValid) {
+        [pendingConnectTimeoutTimer invalidate];
+    }
+    pendingConnectTimeoutTimer = nil;
+    pendingConnectAddress = nil;
+    pendingConnectRetryCount = 0;
+    pendingConnectPhase = RNBluetoothPendingConnectPhaseIdle;
+    pendingConnectPeripheral = nil;
+    _waitingConnect = nil;
+    self.connectResolveBlock = nil;
+    self.connectRejectBlock = nil;
+    clearPendingConnectWarmup();
+}
+
+- (void)startPendingConnectTimeoutIfNeeded {
+    if (pendingConnectTimeoutTimer && pendingConnectTimeoutTimer.isValid) {
+        return;
+    }
+    pendingConnectTimeoutTimer = [NSTimer scheduledTimerWithTimeInterval:pendingConnectTimeoutInterval
+                                                                  target:self
+                                                                selector:@selector(onPendingConnectTimeout)
+                                                                userInfo:nil
+                                                                 repeats:NO];
+}
+
+- (void)onPendingConnectTimeout {
+    if (!pendingConnectAddress || !self.connectRejectBlock) {
+        [self clearPendingConnectRequest];
+        return;
+    }
+
+    CBPeripheral *peripheral = pendingConnectPeripheral;
+    if (pendingConnectPhase == RNBluetoothPendingConnectPhaseScanning && self.centralManager.isScanning) {
+        [self.centralManager stopScan];
+    } else if (peripheral) {
+        [self.centralManager cancelPeripheralConnection:peripheral];
+    }
+
+    NSString *message = [NSString stringWithFormat:@"Timed out while connecting to Bluetooth peripheral %@.",
+                         pendingConnectAddress];
+    [self rejectPendingConnectForPeripheral:peripheral
+                                       code:@"CONNECT_TIMEOUT"
+                                    message:message
+                                      error:nil];
+}
+
 - (void)resolveConnectWhenWritableReady:(CBPeripheral *)peripheral characteristic:(CBCharacteristic *)characteristic {
     if (peripheral && peripheral.identifier && peripheral.identifier.UUIDString) {
         cachedWriteCharacteristic = characteristic;
         cachedWritePeripheralId = peripheral.identifier.UUIDString;
     }
-    pendingConnectAddress = nil;
-    pendingConnectRetryCount = 0;
-    clearPendingConnectWarmup();
-
-    if (self.connectResolveBlock) {
-        RCTPromiseResolveBlock resolveBlock = self.connectResolveBlock;
-        resolveBlock(nil);
+    RCTPromiseResolveBlock resolveBlock = self.connectResolveBlock;
+    if (!resolveBlock) {
+        return;
     }
-    _waitingConnect = nil;
-    self.connectResolveBlock = nil;
-    self.connectRejectBlock = nil;
+
+    [self clearPendingConnectRequest];
+    resolveBlock(nil);
     [self emitConnectedEventForPeripheral:peripheral];
 }
 
 - (void)rejectPendingConnectForPeripheral:(CBPeripheral *)peripheral code:(NSString *)code message:(NSString *)message error:(NSError *)error {
-    clearPendingConnectWarmup();
-    clearCachedWriteCharacteristic();
-    pendingConnectAddress = nil;
-    pendingConnectRetryCount = 0;
-
-    if(self.connectRejectBlock){
-        RCTPromiseRejectBlock rejectBlock = self.connectRejectBlock;
-        rejectBlock(code ?: @"CONNECT_FAILED", message ?: @"CONNECT_FAILED", error);
+    RCTPromiseRejectBlock rejectBlock = self.connectRejectBlock;
+    if (!rejectBlock) {
+        return;
     }
-    self.connectRejectBlock = nil;
-    self.connectResolveBlock = nil;
-    _waitingConnect = nil;
-    connected = nil;
 
-    if(hasListeners){
-        [self sendEventWithName:EVENT_UNABLE_CONNECT body:@{@"name":peripheral.name?peripheral.name:@"",@"address":peripheral.identifier.UUIDString ?: @""}];
+    NSString *address = pendingConnectAddress ?: peripheral.identifier.UUIDString ?: @"";
+    NSString *name = peripheral.name ?: @"";
+    BOOL failedConnectedPeripheral = connected && connected.identifier.UUIDString
+        && [connected.identifier.UUIDString isEqualToString:address];
+
+    [self clearPendingConnectRequest];
+    if (failedConnectedPeripheral) {
+        connected = nil;
+        clearCachedWriteCharacteristic();
     }
+    rejectBlock(code ?: @"CONNECT_FAILED", message ?: @"CONNECT_FAILED", error);
+
+    if(hasListeners && ![code isEqualToString:@"CONNECT_CANCELLED"]){
+        [self sendEventWithName:EVENT_UNABLE_CONNECT body:@{@"name":name,@"address":address}];
+    }
+}
+
+- (void)resumePendingConnectionIfPossible {
+    if (!pendingConnectAddress || !self.connectResolveBlock || !self.connectRejectBlock) {
+        return;
+    }
+
+    CBManagerState state = self.centralManager.state;
+    if (state == CBManagerStateResetting) {
+        if (pendingConnectTimeoutTimer && pendingConnectTimeoutTimer.isValid) {
+            [pendingConnectTimeoutTimer invalidate];
+        }
+        pendingConnectTimeoutTimer = nil;
+        pendingConnectPeripheral = nil;
+        connected = nil;
+        clearCachedWriteCharacteristic();
+        clearPendingConnectWarmup();
+        pendingConnectPhase = RNBluetoothPendingConnectPhaseWaitingForBluetooth;
+        return;
+    }
+    if (state == CBManagerStateUnknown) {
+        if (pendingConnectTimeoutTimer && pendingConnectTimeoutTimer.isValid) {
+            [pendingConnectTimeoutTimer invalidate];
+        }
+        pendingConnectTimeoutTimer = nil;
+        pendingConnectPhase = RNBluetoothPendingConnectPhaseWaitingForBluetooth;
+        return;
+    }
+
+    if (state == CBManagerStatePoweredOff) {
+        [self rejectPendingConnectForPeripheral:pendingConnectPeripheral
+                                           code:@"BLUETOOTH_POWERED_OFF"
+                                        message:@"Bluetooth is powered off."
+                                          error:nil];
+        return;
+    }
+    if (state == CBManagerStateUnauthorized) {
+        [self rejectPendingConnectForPeripheral:pendingConnectPeripheral
+                                           code:@"BLUETOOTH_UNAUTHORIZED"
+                                        message:@"Bluetooth access is not authorized."
+                                          error:nil];
+        return;
+    }
+    if (state == CBManagerStateUnsupported) {
+        [self rejectPendingConnectForPeripheral:pendingConnectPeripheral
+                                           code:@"BLUETOOTH_UNSUPPORTED"
+                                        message:@"Bluetooth Low Energy is not supported on this device."
+                                          error:nil];
+        return;
+    }
+    if (state != CBManagerStatePoweredOn) {
+        [self rejectPendingConnectForPeripheral:pendingConnectPeripheral
+                                           code:@"BLUETOOTH_INVALID_STATE"
+                                        message:@"Bluetooth is not available for a connection."
+                                          error:nil];
+        return;
+    }
+
+    [self startPendingConnectTimeoutIfNeeded];
+
+    if (pendingConnectPhase == RNBluetoothPendingConnectPhaseWaitingForPreviousDisconnect
+        || pendingConnectPhase == RNBluetoothPendingConnectPhaseScanning
+        || pendingConnectPhase == RNBluetoothPendingConnectPhaseConnecting
+        || pendingConnectPhase == RNBluetoothPendingConnectPhaseRetryScheduled
+        || pendingConnectPhase == RNBluetoothPendingConnectPhaseDiscoveringWritable) {
+        return;
+    }
+
+    if (connected && connected.identifier.UUIDString) {
+        if ([connected.identifier.UUIDString isEqualToString:pendingConnectAddress]) {
+            RCTPromiseResolveBlock resolveBlock = self.connectResolveBlock;
+            [self clearPendingConnectRequest];
+            resolveBlock(nil);
+            return;
+        }
+
+        pendingConnectPhase = RNBluetoothPendingConnectPhaseWaitingForPreviousDisconnect;
+        [self.centralManager cancelPeripheralConnection:connected];
+        return;
+    }
+
+    CBPeripheral *peripheral = nil;
+    NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:pendingConnectAddress];
+    if (uuid) {
+        NSArray<CBPeripheral *> *retrievedPeripherals =
+            [self.centralManager retrievePeripheralsWithIdentifiers:@[uuid]];
+        peripheral = [retrievedPeripherals firstObject];
+    }
+    if (!peripheral) {
+        peripheral = [self.foundDevices objectForKey:pendingConnectAddress];
+    }
+
+    if (!peripheral) {
+        pendingConnectPhase = RNBluetoothPendingConnectPhaseScanning;
+        NSLog(@"Scanning to find pending peripheral %@.", pendingConnectAddress);
+        [self.centralManager scanForPeripheralsWithServices:nil
+                                                   options:@{CBCentralManagerScanOptionAllowDuplicatesKey:@NO}];
+        return;
+    }
+
+    if (!self.foundDevices) {
+        self.foundDevices = [[NSMutableDictionary alloc] init];
+    }
+    self.foundDevices[pendingConnectAddress] = peripheral;
+    pendingConnectPeripheral = peripheral;
+    pendingConnectPhase = RNBluetoothPendingConnectPhaseConnecting;
+    NSLog(@"Connecting to pending peripheral %@.", pendingConnectAddress);
+    [self.centralManager connectPeripheral:peripheral options:nil];
 }
 
 // Will be called when this module's first listener is added.
@@ -603,38 +770,25 @@ RCT_EXPORT_METHOD(connect:(NSString *)address
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
     NSLog(@"Trying to connect....%@",address);
-    pendingConnectAddress = address;
-    pendingConnectRetryCount = 0;
-    [self callStop];
-    if(connected){
-        NSString *connectedAddress =connected.identifier.UUIDString;
-        if([address isEqualToString:connectedAddress]){
-            resolve(nil);
-            return;
-        }else{
-            [self.centralManager cancelPeripheralConnection:connected];
-            //Callbacks:
-            //entralManager:didDisconnectPeripheral:error:
-        }
+    if (self.connectResolveBlock || self.connectRejectBlock || pendingConnectAddress) {
+        reject(@"CONNECT_IN_PROGRESS", @"Another Bluetooth connection request is already pending.", nil);
+        return;
     }
-    CBPeripheral *peripheral = [self.foundDevices objectForKey:address];
+    if (!address || address.length == 0) {
+        reject(@"INVALID_ADDRESS", @"A Bluetooth peripheral UUID is required.", nil);
+        return;
+    }
+
+    [self callStop];
     self.connectResolveBlock = resolve;
     self.connectRejectBlock = reject;
-    if(peripheral){
-          _waitingConnect = address;
-          NSLog(@"Trying to connectPeripheral....%@",address);
-        [self.centralManager connectPeripheral:peripheral options:nil];
-        // Callbacks:
-        //    centralManager:didConnectPeripheral:
-        //    centralManager:didFailToConnectPeripheral:error:
-    }else{
-          //starts the scan.
-        _waitingConnect = address;
-         NSLog(@"Scan to find ....%@",address);
-        [self.centralManager scanForPeripheralsWithServices:nil options:@{CBCentralManagerScanOptionAllowDuplicatesKey:@NO}];
-        //Callbacks:
-        //centralManager:didDiscoverPeripheral:advertisementData:RSSI:
-    }
+    pendingConnectAddress = [address copy];
+    pendingConnectRetryCount = 0;
+    pendingConnectPhase = RNBluetoothPendingConnectPhaseIdle;
+    pendingConnectPeripheral = nil;
+    _waitingConnect = pendingConnectAddress;
+    clearPendingConnectWarmup();
+    [self resumePendingConnectionIfPossible];
 }
 
 RCT_EXPORT_METHOD(disconnect:(RCTPromiseResolveBlock)resolve
@@ -643,17 +797,15 @@ RCT_EXPORT_METHOD(disconnect:(RCTPromiseResolveBlock)resolve
     @try {
         [self callStop];
 
-        if(self.connectRejectBlock){
-            self.connectRejectBlock(@"CONNECT_CANCELLED",
-                                    @"Bluetooth connection was cancelled.",
-                                    nil);
+        if(connected){
+            [self.centralManager cancelPeripheralConnection:connected];
+        }else if(pendingConnectPeripheral){
+            [self.centralManager cancelPeripheralConnection:pendingConnectPeripheral];
         }
-        self.connectRejectBlock = nil;
-        self.connectResolveBlock = nil;
-        _waitingConnect = nil;
-        pendingConnectAddress = nil;
-        pendingConnectRetryCount = 0;
-        clearPendingConnectWarmup();
+        [self rejectPendingConnectForPeripheral:pendingConnectPeripheral
+                                           code:@"CONNECT_CANCELLED"
+                                        message:@"Bluetooth connection was cancelled."
+                                          error:nil];
 
         if(writeDataDelegate && (toWrite || pendingWritePayload || waitingWriteResponse || waitingNoRespReady || rawWriteResolve || rawWriteReject)){
             recordRawWriteError(@"DISCONNECTED", @"Bluetooth connection was cleared.", nil);
@@ -663,9 +815,6 @@ RCT_EXPORT_METHOD(disconnect:(RCTPromiseResolveBlock)resolve
         resetWriteState();
         clearCachedWriteCharacteristic();
 
-        if(connected){
-            [self.centralManager cancelPeripheralConnection:connected];
-        }
         connected = nil;
         resolve(nil);
     }
@@ -706,6 +855,8 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
 
 
 -(void)callStop{
+    BOOL shouldResumePendingConnect = pendingConnectPhase == RNBluetoothPendingConnectPhaseScanning
+        && pendingConnectAddress && self.connectResolveBlock && self.connectRejectBlock;
     if(self.centralManager.isScanning){
         [self.centralManager stopScan];
         NSMutableArray *devices = [[NSMutableArray alloc] init];
@@ -735,6 +886,12 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
     }
     self.scanRejectBlock = nil;
     self.scanResolveBlock = nil;
+    if (shouldResumePendingConnect) {
+        pendingConnectPhase = RNBluetoothPendingConnectPhaseIdle;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self resumePendingConnectionIfPossible];
+        });
+    }
 }
 - (void) initSupportServices
 {
@@ -773,6 +930,7 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
  **/
 - (void)centralManagerDidUpdateState:(CBCentralManager *)central{
     NSLog(@"%ld",(long)central.state);
+    [self resumePendingConnectionIfPossible];
 }
 
 - (void)centralManager:(CBCentralManager *)central didDiscoverPeripheral:(CBPeripheral *)peripheral advertisementData:(NSDictionary<NSString *, id> *)advertisementData RSSI:(NSNumber *)RSSI{
@@ -786,96 +944,147 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
     if(hasListeners){
         [self sendEventWithName:EVENT_DEVICE_FOUND body:@{@"device":idAndName}];
     }
-    if(_waitingConnect && [_waitingConnect isEqualToString: peripheral.identifier.UUIDString]){
-        [self.centralManager connectPeripheral:peripheral options:nil];
+    if(pendingConnectPhase == RNBluetoothPendingConnectPhaseScanning
+       && pendingConnectAddress
+       && [pendingConnectAddress isEqualToString:peripheral.identifier.UUIDString]){
+        pendingConnectPeripheral = peripheral;
+        pendingConnectPhase = RNBluetoothPendingConnectPhaseConnecting;
         [self callStop];
+        [self.centralManager connectPeripheral:peripheral options:nil];
     }
 }
 
 - (void)centralManager:(CBCentralManager *)central didConnectPeripheral:(CBPeripheral *)peripheral{
     NSLog(@"did connected: %@",peripheral);
-    connected = peripheral;
-    pendingConnectAddress = nil;
-    pendingConnectRetryCount = 0;
     NSString *pId = peripheral.identifier.UUIDString;
-    if(_waitingConnect && [_waitingConnect isEqualToString: pId] && self.connectResolveBlock){
-        NSLog(@"Preparing writable BLE characteristic before resolving connect.");
-        clearPendingConnectWarmup();
-        waitingConnectWritable = YES;
-        peripheral.delegate = self;
-        [peripheral discoverServices:nil];
+    BOOL isCurrentPendingAttempt = pendingConnectAddress
+        && [pendingConnectAddress isEqualToString:pId]
+        && self.connectResolveBlock
+        && pendingConnectPhase == RNBluetoothPendingConnectPhaseConnecting;
+    if (!isCurrentPendingAttempt) {
+        NSLog(@"Ignoring stale connection callback for %@.", pId);
+        [self.centralManager cancelPeripheralConnection:peripheral];
         return;
     }
-    NSLog(@"going to emit EVENT_CONNECTED.");
-    [self emitConnectedEventForPeripheral:peripheral];
+
+    connected = peripheral;
+    NSLog(@"Preparing writable BLE characteristic before resolving connect.");
+    clearPendingConnectWarmup();
+    waitingConnectWritable = YES;
+    pendingConnectRetryCount = 0;
+    pendingConnectPeripheral = peripheral;
+    pendingConnectPhase = RNBluetoothPendingConnectPhaseDiscoveringWritable;
+    peripheral.delegate = self;
+    [peripheral discoverServices:nil];
 }
 
 - (void)centralManager:(CBCentralManager *)central didDisconnectPeripheral:(CBPeripheral *)peripheral error:(nullable NSError *)error{
-    clearCachedWriteCharacteristic();
-    clearPendingConnectWarmup();
-    if(writeDataDelegate && (toWrite || pendingWritePayload || waitingWriteResponse || waitingNoRespReady || rawWriteResolve || rawWriteReject)){
-        NSString *message = [NSString stringWithFormat:@"Peripheral disconnected during BLE write%@",
-                             error.localizedDescription.length > 0
-                               ? [NSString stringWithFormat:@": %@", error.localizedDescription]
-                               : @""];
-        recordRawWriteError(@"DISCONNECTED_DURING_WRITE", message, error);
-        [writeDataDelegate didWriteDataToBle:false];
-        toWrite = nil;
-        resetWriteState();
+    NSString *peripheralId = peripheral.identifier.UUIDString;
+    BOOL disconnectedActivePeripheral = connected && connected.identifier.UUIDString
+        && [connected.identifier.UUIDString isEqualToString:peripheralId];
+    BOOL disconnectedPendingPeripheral = pendingConnectAddress
+        && [pendingConnectAddress isEqualToString:peripheralId];
+    if (!disconnectedActivePeripheral && !disconnectedPendingPeripheral) {
+        NSLog(@"Ignoring stale disconnection callback for %@.", peripheralId);
+        return;
     }
-    if(!connected && _waitingConnect && [_waitingConnect isEqualToString:peripheral.identifier.UUIDString]){
-        if(self.connectRejectBlock){
-            RCTPromiseRejectBlock rjBlock = self.connectRejectBlock;
-            rjBlock(@"",@"",error);
-            self.connectRejectBlock = nil;
-            self.connectResolveBlock = nil;
-            _waitingConnect=nil;
+
+    clearPendingConnectWarmup();
+    if (disconnectedActivePeripheral) {
+        clearCachedWriteCharacteristic();
+        if(writeDataDelegate && (toWrite || pendingWritePayload || waitingWriteResponse || waitingNoRespReady || rawWriteResolve || rawWriteReject)){
+            NSString *message = [NSString stringWithFormat:@"Peripheral disconnected during BLE write%@",
+                                 error.localizedDescription.length > 0
+                                   ? [NSString stringWithFormat:@": %@", error.localizedDescription]
+                                   : @""];
+            recordRawWriteError(@"DISCONNECTED_DURING_WRITE", message, error);
+            [writeDataDelegate didWriteDataToBle:false];
+            toWrite = nil;
+            resetWriteState();
         }
         connected = nil;
-        if(hasListeners){
-            [self sendEventWithName:EVENT_UNABLE_CONNECT body:@{@"name":peripheral.name?peripheral.name:@"",@"address":peripheral.identifier.UUIDString}];
+    }
+
+    if (disconnectedPendingPeripheral
+        && (central.state == CBManagerStateUnknown || central.state == CBManagerStateResetting)) {
+        if (pendingConnectTimeoutTimer && pendingConnectTimeoutTimer.isValid) {
+            [pendingConnectTimeoutTimer invalidate];
         }
-    }else{
-        connected = nil;
+        pendingConnectTimeoutTimer = nil;
+        pendingConnectPeripheral = nil;
+        pendingConnectPhase = RNBluetoothPendingConnectPhaseWaitingForBluetooth;
+        return;
+    }
+
+    if (pendingConnectAddress
+        && pendingConnectPhase == RNBluetoothPendingConnectPhaseWaitingForPreviousDisconnect
+        && ![pendingConnectAddress isEqualToString:peripheralId]) {
         if(hasListeners){
             [self sendEventWithName:EVENT_CONNECTION_LOST body:nil];
         }
+        pendingConnectPhase = RNBluetoothPendingConnectPhaseIdle;
+        [self resumePendingConnectionIfPossible];
+        return;
+    }
+
+    if (disconnectedPendingPeripheral) {
+        NSString *message = error.localizedDescription.length > 0
+            ? [NSString stringWithFormat:@"Bluetooth peripheral disconnected while connecting: %@", error.localizedDescription]
+            : @"Bluetooth peripheral disconnected before the connection became writable.";
+        [self rejectPendingConnectForPeripheral:peripheral
+                                           code:@"CONNECT_DISCONNECTED"
+                                        message:message
+                                          error:error];
+        return;
+    }
+
+    connected = nil;
+    if(hasListeners){
+        [self sendEventWithName:EVENT_CONNECTION_LOST body:nil];
     }
 }
 
 - (void)centralManager:(CBCentralManager *)central didFailToConnectPeripheral:(CBPeripheral *)peripheral error:(nullable NSError *)error{
-    BOOL canRetry = NO;
     NSString *peripheralId = peripheral.identifier.UUIDString;
-    clearPendingConnectWarmup();
-    if (pendingConnectAddress && peripheralId && [pendingConnectAddress isEqualToString:peripheralId]) {
-        canRetry = shouldRetryConnectForError(error) && (pendingConnectRetryCount < maxConnectRetries);
+    BOOL isCurrentPendingAttempt = pendingConnectAddress && peripheralId
+        && [pendingConnectAddress isEqualToString:peripheralId]
+        && pendingConnectPhase == RNBluetoothPendingConnectPhaseConnecting;
+    if (!isCurrentPendingAttempt) {
+        return;
     }
+
+    clearPendingConnectWarmup();
+    BOOL canRetry = shouldRetryConnectForError(error) && (pendingConnectRetryCount < maxConnectRetries);
     if (canRetry) {
         pendingConnectRetryCount += 1;
+        pendingConnectPhase = RNBluetoothPendingConnectPhaseRetryScheduled;
+        NSString *retryAddress = [pendingConnectAddress copy];
         NSLog(@"[BLE] retrying connect (%lu/%lu) for %@ due to error: %@",
               (unsigned long)pendingConnectRetryCount,
               (unsigned long)maxConnectRetries,
               peripheralId,
               error.localizedDescription);
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self.centralManager connectPeripheral:peripheral options:nil];
+            if (pendingConnectAddress
+                && [pendingConnectAddress isEqualToString:retryAddress]
+                && pendingConnectPhase == RNBluetoothPendingConnectPhaseRetryScheduled
+                && self.connectRejectBlock) {
+                pendingConnectPhase = RNBluetoothPendingConnectPhaseIdle;
+                pendingConnectPeripheral = nil;
+                [self resumePendingConnectionIfPossible];
+            }
         });
         return;
     }
-    pendingConnectAddress = nil;
-    pendingConnectRetryCount = 0;
-    if(self.connectRejectBlock){
-        RCTPromiseRejectBlock rjBlock = self.connectRejectBlock;
-        rjBlock(@"",@"",error);
-        self.connectRejectBlock = nil;
-        self.connectResolveBlock = nil;
-        _waitingConnect = nil;
-    }
-    connected = nil;
-    if(hasListeners){
-        [self sendEventWithName:EVENT_UNABLE_CONNECT body:@{@"name":peripheral.name?peripheral.name:@"",@"address":peripheral.identifier.UUIDString}];
-    }
-    }
+
+    NSString *message = error.localizedDescription.length > 0
+        ? [NSString stringWithFormat:@"Unable to connect to Bluetooth peripheral %@: %@", peripheralId, error.localizedDescription]
+        : [NSString stringWithFormat:@"Unable to connect to Bluetooth peripheral %@.", peripheralId];
+    [self rejectPendingConnectForPeripheral:peripheral
+                                       code:@"CONNECT_FAILED"
+                                    message:message
+                                      error:error];
+}
 
 /**
  * END OF CBCentralManagerDelegate
@@ -973,21 +1182,6 @@ RCT_EXPORT_METHOD(writeRaw:(NSString *)data
         NSLog(@"服务id：%@",service.UUID.UUIDString);
     }
     NSLog(@"开始扫描外设服务的特征 %@...",peripheral.name);
-    
-    if(error && self.connectRejectBlock){
-        RCTPromiseRejectBlock rjBlock = self.connectRejectBlock;
-         rjBlock(@"",@"",error);
-        self.connectRejectBlock = nil;
-        self.connectResolveBlock = nil;
-        connected = nil;
-    }else
-    if(_waitingConnect && peripheral.identifier.UUIDString && [_waitingConnect isEqualToString:peripheral.identifier.UUIDString]){
-        RCTPromiseResolveBlock rsBlock = self.connectResolveBlock;
-        rsBlock(peripheral.identifier.UUIDString);
-        self.connectRejectBlock = nil;
-        self.connectResolveBlock = nil;
-        connected = peripheral;
-    }
 }
 
 /*!
