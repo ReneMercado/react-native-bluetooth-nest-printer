@@ -18,6 +18,7 @@ export interface BluetoothProps {
   enableBluetooth?: Function;
   disableBluetooth?: Function;
   scanDevices?: Promise<Function>;
+  cancelDiscovery?: () => Promise<void>;
   getPairedDevices?: () => Promise<BluetoothDevice[]>;
   connect?: Promise<Function>;
   disconnect?: () => Promise<void>;
@@ -27,6 +28,8 @@ export interface BluetoothProps {
 export interface BluetoothManagerModule extends BluetoothProps {
   /** Android only: returns bonded devices without starting discovery. */
   getPairedDevices(): Promise<BluetoothDevice[]>;
+  /** Stops an active discovery scan without disconnecting or unpairing. */
+  cancelDiscovery(): Promise<void>;
   /** Closes the active Bluetooth transport without unpairing the device. */
   disconnect(): Promise<void>;
 }
