@@ -585,6 +585,18 @@ RCT_EXPORT_METHOD(stopScan:(RCTPromiseResolveBlock)resolve
     resolve(nil);
 }
 
+RCT_EXPORT_METHOD(cancelDiscovery:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+    @try {
+        [self callStop];
+        resolve(nil);
+    }
+    @catch(NSException *exception) {
+        reject(@"CANCEL_DISCOVERY_FAILED", [exception reason], nil);
+    }
+}
+
 //connect(address)
 RCT_EXPORT_METHOD(connect:(NSString *)address
                   findEventsWithResolver:(RCTPromiseResolveBlock)resolve

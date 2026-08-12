@@ -207,6 +207,14 @@ BluetoothManager.scanDevices().then(
 );
 ```
 
+- cancelDiscovery ==>
+  async function, stops the active Bluetooth discovery scan. It does not disconnect a connected device and does not unpair it. It is safe to call when no scan is active and can be awaited before `BluetoothManager.connect()`.
+
+```javascript
+await BluetoothManager.cancelDiscovery();
+await BluetoothManager.connect(address);
+```
+
 - connect ==>
   async function, connect the specified devices, if not bound, bound dailog promps.
 
