@@ -1,8 +1,5 @@
 buildscript {
     repositories {
-        jcenter { url "http://jcenter.bintray.com/" 
-                  allowInsecureProtocol = true
-                }
         maven { url "http://repo.spring.io/plugins-release/"
                 allowInsecureProtocol = true
               }
@@ -45,9 +42,6 @@ android {
 }
 
 repositories {
-    jcenter { url "http://jcenter.bintray.com/" 
-              allowInsecureProtocol = true
-            }
     maven { url "http://repo.spring.io/plugins-release/"
             allowInsecureProtocol = true
           }
