@@ -18,11 +18,9 @@ Pod::Spec.new do |s|
 
   # This is needed for Xcode 14+ builds
   s.pod_target_xcconfig = {
-    'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'arm64',
     'IPHONEOS_DEPLOYMENT_TARGET' => '12.0'
   }
   s.user_target_xcconfig = { 
-    'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'arm64',
     'IPHONEOS_DEPLOYMENT_TARGET' => '12.0'
   }
 end
